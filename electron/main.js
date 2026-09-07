@@ -32,7 +32,7 @@ let storeName = "Zandman's Magic Shop";
 let promptWin = null;
 let tipsHeld = false;
 let tipsPinned = false;
-let tipsPoll = null;
+let tipsWatch = null;
 
 function loadEnv() {
   const out = {};
@@ -330,7 +330,7 @@ function rebuildMenu() {
     {
       label: tipsPinned
         ? "Hide all visitor info"
-        : "Show all visitor info (hold ⌥`)",
+        : "Show all visitor info (hold ⌥` or ⌃⇧A)",
       click: () => togglePinnedTips(),
     },
     { type: "separator" },
@@ -517,49 +517,41 @@ function tipsVisible() {
   return tipsHeld || tipsPinned;
 }
 
-function stopTipsPoll() {
-  if (tipsPoll) {
-    clearInterval(tipsPoll);
-    tipsPoll = null;
-  }
-}
-
 function togglePinnedTips() {
-  stopTipsPoll();
-  tipsHeld = false;
   tipsPinned = !tipsPinned;
   sendTips(tipsVisible());
   rebuildMenu();
 }
 
-function onTipsHotkey() {
-  if (tipsPoll) return;
-  tipsHeld = true;
-  sendTips(true);
-  let seen = false;
-  let ticks = 0;
-  tipsPoll = setInterval(() => {
-    ticks += 1;
-    const held = hidKeys.tipsComboHeld();
-    if (held) seen = true;
-    if (seen && !held) {
-      stopTipsPoll();
-      tipsHeld = false;
-      sendTips(tipsVisible());
-    } else if (!seen && ticks >= 8) {
-      stopTipsPoll();
-      tipsHeld = false;
-      tipsPinned = !tipsPinned;
-      sendTips(tipsVisible());
-      rebuildMenu();
-    }
-  }, 50);
+function syncHeldTips() {
+  const held = hidKeys.tipsComboHeld();
+  if (held === tipsHeld) return;
+  tipsHeld = held;
+  sendTips(tipsVisible());
+}
+
+function startTipsWatcher() {
+  if (tipsWatch) return;
+  hidKeys.tipsComboHeld();
+  tipsWatch = setInterval(syncHeldTips, 50);
 }
 
 function registerTipsShortcut() {
   globalShortcut.unregisterAll();
-  const ok = globalShortcut.register("Alt+`", onTipsHotkey);
-  if (!ok) console.error("failed to register ⌥` shortcut");
+  const accelerators = ["Control+Shift+A", "Alt+`", "Option+`"];
+  for (const accel of accelerators) {
+    try {
+      const ok = globalShortcut.register(accel, () => {
+        if (hidKeys.tipsComboHeld()) return;
+        tipsPinned = !tipsPinned;
+        sendTips(tipsVisible());
+        rebuildMenu();
+      });
+      if (!ok) console.error("failed to register", accel);
+    } catch (err) {
+      console.error("shortcut error", accel, err);
+    }
+  }
 }
 
 app.whenReady().then(() => {
@@ -574,6 +566,7 @@ app.whenReady().then(() => {
 
   overlay = createOverlay();
   registerTipsShortcut();
+  startTipsWatcher();
   tray = new Tray(makeTrayIcon());
   tray.setTitle("");
   tray.setToolTip("Sale Arcade");
@@ -583,6 +576,7 @@ app.whenReady().then(() => {
   overlay.webContents.on("did-finish-load", () => {
     sendLayout();
     sendSettings();
+    sendTips(tipsVisible());
     sendEvent({ type: "mute", muted });
     if (process.argv.includes("--demo")) {
       sendEvent({ sessionId: "demo-1", type: "enter" });
@@ -667,7 +661,10 @@ app.on("window-all-closed", (e) => {
 });
 
 app.on("before-quit", () => {
-  stopTipsPoll();
+  if (tipsWatch) {
+    clearInterval(tipsWatch);
+    tipsWatch = null;
+  }
   globalShortcut.unregisterAll();
   clearTimeout(reconnectTimer);
   if (socket) {
