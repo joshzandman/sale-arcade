@@ -1141,7 +1141,7 @@ function drawNpc(npc) {
 
 function hoverCardLines(npc) {
   const items = npc.items || [];
-  const scale = 2;
+  const scale = 1;
   const lines = [
     {
       text: hoverViewLine(npc).slice(0, 28),
