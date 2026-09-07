@@ -199,7 +199,8 @@ function sendSettings() {
 }
 
 function setLandmark(value) {
-  landmark = value === "street" ? "street" : "door";
+  const allowed = ["none", "door", "street", "elevator"];
+  landmark = allowed.indexOf(value) >= 0 ? value : "door";
   saveState({ landmark });
   sendSettings();
   rebuildMenu();
@@ -277,6 +278,12 @@ function rebuildMenu() {
       label: "Landmark",
       submenu: [
         {
+          label: "None",
+          type: "radio",
+          checked: landmark === "none",
+          click: () => setLandmark("none"),
+        },
+        {
           label: "Door",
           type: "radio",
           checked: landmark === "door",
@@ -287,6 +294,12 @@ function rebuildMenu() {
           type: "radio",
           checked: landmark === "street",
           click: () => setLandmark("street"),
+        },
+        {
+          label: "Elevator",
+          type: "radio",
+          checked: landmark === "elevator",
+          click: () => setLandmark("elevator"),
         },
       ],
     },
@@ -441,7 +454,7 @@ ipcMain.on("arcade-count", (_event, count) => {
 app.whenReady().then(() => {
   const env = { ...process.env, ...loadEnv() };
   const saved = loadState();
-  if (saved.landmark === "street" || saved.landmark === "door") {
+  if (["none", "door", "street", "elevator"].indexOf(saved.landmark) >= 0) {
     landmark = saved.landmark;
   }
   if (saved.storeName) storeName = String(saved.storeName).slice(0, 40);

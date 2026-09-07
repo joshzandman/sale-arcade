@@ -47,6 +47,13 @@ const ArcadeAudio = (() => {
       tone(180, 0.18, "square", 0.04);
       noise(0.12, 0.03);
     },
+    elevator() {
+      tone(523, 0.12, "square", 0.045);
+      tone(392, 0.2, "square", 0.03);
+    },
+    ding() {
+      tone(659, 0.16, "square", 0.05);
+    },
     step() {
       tone(140, 0.04, "square", 0.02);
     },

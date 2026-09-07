@@ -2,6 +2,8 @@ const MAX_NPCS = 6;
 const IDLE_MS = 25000;
 const NPC_H = 140;
 const DOOR_H = 196;
+const ELEVATOR_W = 92;
+const ELEVATOR_H = 152;
 const WALK_SPEED = 130;
 const canvas = document.getElementById("stage");
 const ctx = canvas.getContext("2d");
@@ -20,6 +22,7 @@ let rockets = [];
 let caption = null;
 let door = { phase: "closed", t: 0 };
 let doorHold = 0;
+let elevator = { phase: "hidden", rise: 0, doors: 0, hold: 0 };
 let last = performance.now();
 let muted = false;
 let settings = {
@@ -53,7 +56,12 @@ function applyLayout(data) {
 
 function applySettings(data) {
   if (!data) return;
-  if (data.landmark === "street" || data.landmark === "door") {
+  if (["none", "door", "street", "elevator"].indexOf(data.landmark) >= 0) {
+    if (settings.landmark !== data.landmark) {
+      elevator = { phase: "hidden", rise: 0, doors: 0, hold: 0 };
+      door = { phase: "closed", t: 0 };
+      doorHold = 0;
+    }
     settings.landmark = data.landmark;
   }
   if (data.storeName) {
@@ -95,8 +103,18 @@ function streetSignWidth() {
 }
 
 function landmarkWidth() {
+  if (settings.landmark === "none") return 36;
   if (settings.landmark === "street") return streetSignWidth();
+  if (settings.landmark === "elevator") return ELEVATOR_W + 8;
   return doorWidth();
+}
+
+function elevatorX() {
+  return stage.left + stage.width - ELEVATOR_W - 20;
+}
+
+function elevatorReady() {
+  return elevator.phase === "open" || (elevator.phase === "opening" && elevator.doors > 0.55);
 }
 
 function doorX() {
@@ -205,6 +223,25 @@ function openDoor() {
   doorHold = 0.9;
 }
 
+function callElevator() {
+  if (settings.landmark !== "elevator") return;
+  if (elevator.phase === "hidden") {
+    elevator.phase = "rising";
+    elevator.rise = 0;
+    elevator.doors = 0;
+    ArcadeAudio.elevator();
+  } else if (elevator.phase === "descending" && elevator.rise < 0.35) {
+    elevator.phase = "rising";
+    ArcadeAudio.elevator();
+  }
+  elevator.hold = 0.85;
+}
+
+function requestLandmark() {
+  if (settings.landmark === "door") openDoor();
+  if (settings.landmark === "elevator") callElevator();
+}
+
 function handleEvent(payload) {
   if (!payload) return;
   if (payload.type === "mute") {
@@ -309,7 +346,7 @@ function spawnOrRefresh(id, payload) {
     id,
     slot,
     state: "entering",
-    x: doorX() + 10,
+    x: settings.landmark === "elevator" ? elevatorX() + 18 : doorX() + 10,
     targetX: slotX(slot),
     facing: -1,
     lastEvent: Date.now(),
@@ -319,6 +356,7 @@ function spawnOrRefresh(id, payload) {
     browseT: 0,
     browseTarget: null,
     items: [],
+    disembarked: false,
   };
   npcs.set(id, npc);
   applyName(npc, payload);
@@ -334,7 +372,7 @@ function spawnOrRefresh(id, payload) {
     pendingItems.get(id).forEach((item) => addCartItem(npc, item));
     pendingItems.delete(id);
   }
-  openDoor();
+  requestLandmark();
   reportCount();
   return npc;
 }
@@ -380,10 +418,20 @@ function stepNpc(npc, dt) {
 
   if (npc.state === "entering") {
     npc.facing = -1;
-    npc.x -= WALK_SPEED * dt;
-    if (npc.x <= npc.targetX) {
-      npc.x = npc.targetX;
-      npc.state = npc.hadCart ? "cart" : "idle";
+    const waitingOnLift =
+      settings.landmark === "elevator" && !npc.disembarked && !elevatorReady();
+    if (waitingOnLift) {
+      npc.x = elevatorX() + 18;
+      requestLandmark();
+    } else {
+      if (settings.landmark === "elevator" && elevatorReady()) {
+        npc.disembarked = true;
+      }
+      npc.x -= WALK_SPEED * dt;
+      if (npc.x <= npc.targetX) {
+        npc.x = npc.targetX;
+        npc.state = npc.hadCart ? "cart" : "idle";
+      }
     }
   } else if (npc.state === "idle") {
     npc.browseT = (npc.browseT || 0) + dt;
@@ -438,13 +486,29 @@ function stepNpc(npc, dt) {
     }
   } else if (npc.state === "leaving") {
     npc.facing = 1;
-    npc.x += WALK_SPEED * dt;
-    if (npc.x > doorX() - 20) openDoor();
-    if (npc.x >= doorX() + 4) {
-      npcs.delete(npc.id);
-      reportCount();
-      admitWaiting();
-      return;
+    if (settings.landmark === "elevator") {
+      const cabin = elevatorX() + 10;
+      if (npc.x > cabin - 28) requestLandmark();
+      if (!elevatorReady() && npc.x >= cabin - 12) {
+        npc.x = cabin - 12;
+      } else {
+        npc.x += WALK_SPEED * dt;
+      }
+      if (elevatorReady() && npc.x >= cabin + 16) {
+        npcs.delete(npc.id);
+        reportCount();
+        admitWaiting();
+        return;
+      }
+    } else {
+      npc.x += WALK_SPEED * dt;
+      if (npc.x > doorX() - 20) requestLandmark();
+      if (npc.x >= doorX() + 4) {
+        npcs.delete(npc.id);
+        reportCount();
+        admitWaiting();
+        return;
+      }
     }
   }
 
@@ -457,6 +521,41 @@ function stepNpc(npc, dt) {
     npc.look = "side";
     npc.browseTarget = null;
     npc.bob = moving ? Math.abs(Math.sin(performance.now() / 90)) * 4 : 0;
+  }
+}
+
+function stepElevator(dt) {
+  if (settings.landmark !== "elevator") return;
+  if (elevator.phase === "rising") {
+    elevator.rise = Math.min(1, elevator.rise + dt * 2.1);
+    if (elevator.rise >= 1) {
+      elevator.phase = "opening";
+      elevator.doors = 0;
+      ArcadeAudio.ding();
+    }
+  } else if (elevator.phase === "opening") {
+    elevator.doors = Math.min(1, elevator.doors + dt * 2.8);
+    if (elevator.doors >= 1) elevator.phase = "open";
+  } else if (elevator.phase === "open") {
+    for (const n of npcs.values()) {
+      if (n.state === "entering" && !n.disembarked) {
+        elevator.hold = Math.max(elevator.hold, 0.35);
+      }
+      if (n.state === "leaving" && n.x > elevatorX() - 24) {
+        elevator.hold = Math.max(elevator.hold, 0.35);
+      }
+    }
+    elevator.hold -= dt;
+    if (elevator.hold <= 0) elevator.phase = "closing";
+  } else if (elevator.phase === "closing") {
+    elevator.doors = Math.max(0, elevator.doors - dt * 2.8);
+    if (elevator.doors <= 0) elevator.phase = "descending";
+  } else if (elevator.phase === "descending") {
+    elevator.rise = Math.max(0, elevator.rise - dt * 2.1);
+    if (elevator.rise <= 0) {
+      elevator.phase = "hidden";
+      elevator.doors = 0;
+    }
   }
 }
 
@@ -593,9 +692,65 @@ function drawStreetSign() {
   }
 }
 
+function drawElevator() {
+  const rise = elevator.rise;
+  if (rise <= 0.02 && elevator.phase === "hidden") return;
+  const x = elevatorX();
+  const cabinH = ELEVATOR_H;
+  const y = groundY() - cabinH * rise;
+  const w = ELEVATOR_W;
+  const doors = elevator.doors;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(stage.left, 0, stage.width, groundY() + 1);
+  ctx.clip();
+  ctx.fillStyle = "#1a1c22";
+  ctx.fillRect(x - 4, y - 6, w + 8, cabinH + 6);
+  ctx.fillStyle = "#6d717c";
+  ctx.fillRect(x, y, w, cabinH);
+  ctx.fillStyle = "#9aa0aa";
+  ctx.fillRect(x, y, w, 10);
+  ctx.fillStyle = "#2b2e36";
+  ctx.fillRect(x + 4, y + 14, w - 8, cabinH - 22);
+  if (doors > 0.05) {
+    ctx.fillStyle = "#c9a24a";
+    ctx.fillRect(x + 10, y + 22, w - 20, cabinH - 36);
+  }
+  const gap = Math.round(((w - 8) / 2) * doors);
+  const leftDoorW = Math.round((w - 8) / 2) - gap;
+  const rightDoorW = Math.round((w - 8) / 2) - gap;
+  ctx.fillStyle = "#8b909c";
+  if (leftDoorW > 0) ctx.fillRect(x + 4, y + 14, leftDoorW, cabinH - 22);
+  if (rightDoorW > 0) {
+    ctx.fillRect(x + w - 4 - rightDoorW, y + 14, rightDoorW, cabinH - 22);
+  }
+  ctx.fillStyle = "#3a3d46";
+  ctx.fillRect(x + 4, y + 14, 2, cabinH - 22);
+  ctx.fillRect(x + w - 6, y + 14, 2, cabinH - 22);
+  ctx.fillStyle = "#111318";
+  ctx.fillRect(x + 8, y + 2, w - 16, 6);
+  const label = splitSignLines(settings.storeName)[0].slice(0, 10);
+  drawPixelText(
+    ctx,
+    label,
+    x + Math.round((w - label.length * 6) / 2),
+    y + 2,
+    1,
+    "#d4e8ff"
+  );
+  ctx.restore();
+  ctx.fillStyle = "rgba(8,6,12,0.55)";
+  ctx.fillRect(x - 6, groundY() - 3, w + 12, 4);
+}
+
 function drawLandmark() {
+  if (settings.landmark === "none") return;
   if (settings.landmark === "street") {
     drawStreetSign();
+    return;
+  }
+  if (settings.landmark === "elevator") {
+    drawElevator();
     return;
   }
   drawDoor();
@@ -624,14 +779,14 @@ function spriteFor(npc) {
 
 function drawBubble(npc, x, y, width) {
   if (!npc.firstName) return;
-  const scale = 1;
+  const scale = 2;
   const text = npc.lastName
     ? `${npc.firstName} ${npc.lastName}`
     : npc.firstName;
   const gaps = (text.match(/ /g) || []).length;
   const tw = (text.length - gaps) * 6 * scale + gaps * 4 * scale;
-  const padX = 5;
-  const padY = 4;
+  const padX = 6;
+  const padY = 5;
   const bw = tw + padX * 2;
   const bh = 7 * scale + padY * 2;
   let bx = Math.round(x + width / 2 - bw / 2);
@@ -691,8 +846,18 @@ function drawCartItems(npc, x, y, width, height, flip) {
   });
 }
 
+function npcVisible(npc) {
+  if (settings.landmark !== "elevator") return true;
+  if (npc.state === "entering" && elevator.rise < 0.82) return false;
+  if (npc.state === "leaving" && npc.x >= elevatorX() + 8 && elevator.doors < 0.35) {
+    return false;
+  }
+  return true;
+}
+
 function drawNpc(npc) {
   if (!sprites) return;
+  if (!npcVisible(npc)) return;
   const spr = spriteFor(npc);
   const hop = npc.state === "celebrating" ? Math.abs(Math.sin(npc.celebT * 8)) * 14 : 0;
   const h = NPC_H;
@@ -729,6 +894,7 @@ function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   stepDoor(dt);
+  stepElevator(dt);
   for (const npc of [...npcs.values()]) stepNpc(npc, dt);
   rockets = stepFireworks(rockets);
 
