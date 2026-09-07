@@ -1,3 +1,13 @@
+function sanitizeImageUrl(url) {
+  if (!url) return undefined;
+  let value = String(url).trim();
+  if (value.indexOf("//") === 0) value = "https:" + value;
+  if (value.indexOf("http://") === 0) value = "https://" + value.slice(7);
+  if (value.indexOf("https://") !== 0) return undefined;
+  if (value.length > 400) return undefined;
+  return value;
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
@@ -73,8 +83,15 @@ export class ArcadeRoom {
           : undefined,
         total: body.total ? String(body.total).slice(0, 24) : undefined,
         firstName: body.firstName
-          ? String(body.firstName).slice(0, 24)
+          ? String(body.firstName).slice(0, 40)
           : undefined,
+        lastName: body.lastName
+          ? String(body.lastName).slice(0, 40)
+          : undefined,
+        productType: body.productType
+          ? String(body.productType).slice(0, 40)
+          : undefined,
+        imageUrl: sanitizeImageUrl(body.imageUrl),
       });
       for (const ws of this.ctx.getWebSockets()) {
         try {

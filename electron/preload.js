@@ -11,4 +11,7 @@ contextBridge.exposeInMainWorld("arcade", {
   onLayout: (cb) => {
     ipcRenderer.on("arcade-layout", (_event, data) => cb(data));
   },
+  onSettings: (cb) => {
+    ipcRenderer.on("arcade-settings", (_event, data) => cb(data));
+  },
 });

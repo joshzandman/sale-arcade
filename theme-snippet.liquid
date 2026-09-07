@@ -1,10 +1,14 @@
 {% comment %}
-  Paste this before </body> in theme.liquid (or a custom liquid section).
-  Logged-in customer first names show as a chat bubble over their NPC.
+  Installed on the live Taiga theme as snippets/sale-arcade-member.liquid
 {% endcomment %}
-{% if customer and customer.first_name != blank %}
-  <script>
-    document.cookie =
-      "sale_arcade_name={{ customer.first_name | url_encode }}; path=/; max-age=2592000; SameSite=Lax";
-  </script>
+{% if customer %}
+  {% assign arcade_name = customer.name | strip %}
+  {% if arcade_name == blank %}
+    {% assign arcade_name = customer.first_name | append: ' ' | append: customer.last_name | strip %}
+  {% endif %}
+  {% if arcade_name != blank %}
+    <script>
+      document.cookie = "sale_arcade_name={{ arcade_name | url_encode }}; path=/; max-age=2592000; SameSite=Lax";
+    </script>
+  {% endif %}
 {% endif %}

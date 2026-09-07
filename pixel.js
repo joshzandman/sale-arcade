@@ -33,7 +33,9 @@ async function sessionId() {
 async function memberName() {
   try {
     const cookie = await browser.cookie.get("sale_arcade_name");
-    if (cookie) return decodeURIComponent(cookie).trim();
+    if (cookie) {
+      return decodeURIComponent(String(cookie).replace(/\+/g, " ")).trim();
+    }
   } catch (err) {
     return "";
   }
@@ -48,8 +50,13 @@ function send(type, extra) {
       { sessionId: sid, type: type, secret: SECRET },
       extra || {}
     );
-    const firstName = body.firstName || cookieName;
-    if (firstName) body.firstName = String(firstName).slice(0, 24);
+    if (!body.firstName && cookieName) body.firstName = cookieName;
+    if (body.firstName) body.firstName = String(body.firstName).slice(0, 40);
+    if (body.lastName) body.lastName = String(body.lastName).slice(0, 40);
+    if (body.firstName && body.lastName) {
+      body.firstName = (body.firstName + " " + body.lastName).slice(0, 40);
+      body.lastName = "";
+    }
     fetch(ENDPOINT, {
       method: "POST",
       body: JSON.stringify(body),
@@ -72,24 +79,29 @@ function startHeartbeat() {
 }
 
 analytics.subscribe("page_viewed", async function () {
-  const flag = await browser.sessionStorage.getItem("sale_arcade_entered");
-  if (!flag) {
-    await browser.sessionStorage.setItem("sale_arcade_entered", "1");
-    send("enter");
-  } else {
-    send("heartbeat");
-  }
+  send("enter");
   startHeartbeat();
 });
 
-analytics.subscribe("product_added_to_cart", function (event) {
-  send("cart", {
+function cartLinePayload(event) {
+  let imageUrl = pick(event, ["data", "cartLine", "merchandise", "image", "src"]);
+  if (!imageUrl) {
+    imageUrl = pick(event, ["data", "cartLine", "merchandise", "image", "url"]);
+  }
+  if (imageUrl.indexOf("//") === 0) imageUrl = "https:" + imageUrl;
+  return {
     productTitle: pick(event, ["data", "cartLine", "merchandise", "product", "title"]),
-  });
+    productType: pick(event, ["data", "cartLine", "merchandise", "product", "type"]),
+    imageUrl: imageUrl,
+  };
+}
+
+analytics.subscribe("product_added_to_cart", function (event) {
+  send("cart", cartLinePayload(event));
 });
 
-analytics.subscribe("product_removed_from_cart", function () {
-  send("cart_empty");
+analytics.subscribe("product_removed_from_cart", function (event) {
+  send("cart_remove", cartLinePayload(event));
 });
 
 analytics.subscribe("checkout_started", function () {
@@ -107,5 +119,14 @@ analytics.subscribe("checkout_completed", function (event) {
   if (!firstName) {
     firstName = pick(checkout, ["shippingAddress", "firstName"]);
   }
-  send("purchase", { total: total, productTitle: title, firstName: firstName });
+  let lastName = pick(checkout, ["billingAddress", "lastName"]);
+  if (!lastName) {
+    lastName = pick(checkout, ["shippingAddress", "lastName"]);
+  }
+  send("purchase", {
+    total: total,
+    productTitle: title,
+    firstName: firstName,
+    lastName: lastName,
+  });
 });

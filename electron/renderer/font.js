@@ -58,7 +58,7 @@ function drawPixelText(ctx, text, x, y, scale, color) {
         }
       }
     }
-    cursor += 6 * scale;
+    cursor += ch === " " ? 4 * scale : 6 * scale;
   }
   ctx.restore();
   return cursor - x;

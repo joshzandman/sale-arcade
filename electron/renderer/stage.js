@@ -13,6 +13,8 @@ const npcs = new Map();
 const waiting = [];
 const pendingCart = new Set();
 const pendingName = new Map();
+const pendingItems = new Map();
+const imageCache = new Map();
 let sprites = null;
 let rockets = [];
 let caption = null;
@@ -20,6 +22,10 @@ let door = { phase: "closed", t: 0 };
 let doorHold = 0;
 let last = performance.now();
 let muted = false;
+let settings = {
+  landmark: "door",
+  storeName: "Zandman's Magic Shop",
+};
 
 function resize() {
   const dpr = window.devicePixelRatio || 1;
@@ -45,6 +51,30 @@ function applyLayout(data) {
   };
 }
 
+function applySettings(data) {
+  if (!data) return;
+  if (data.landmark === "street" || data.landmark === "door") {
+    settings.landmark = data.landmark;
+  }
+  if (data.storeName) {
+    settings.storeName = String(data.storeName).slice(0, 40);
+  }
+}
+
+function splitSignLines(name) {
+  const words = String(name || "STORE")
+    .toUpperCase()
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!words.length) return ["STORE", ""];
+  if (words.length === 1) return [words[0], ""];
+  if (words.length === 2) return [words[0], words[1]];
+  if (words.length === 3) return [words[0], `${words[1]} ${words[2]}`];
+  const mid = Math.ceil(words.length / 2);
+  return [words.slice(0, mid).join(" "), words.slice(mid).join(" ")];
+}
+
 function groundY() {
   return stage.top + stage.height - 22;
 }
@@ -58,8 +88,19 @@ function doorWidth() {
   return Math.max(closed, open);
 }
 
+function streetSignWidth() {
+  const [line1, line2] = splitSignLines(settings.storeName);
+  const longest = Math.max(line1.length, line2.length || 0);
+  return Math.min(stage.width * 0.45, Math.max(130, longest * 12 + 36));
+}
+
+function landmarkWidth() {
+  if (settings.landmark === "street") return streetSignWidth();
+  return doorWidth();
+}
+
 function doorX() {
-  return stage.left + stage.width - doorWidth() - 18;
+  return stage.left + stage.width - landmarkWidth() - 18;
 }
 
 function stageLeft() {
@@ -87,16 +128,75 @@ function reportCount() {
   if (window.arcade) window.arcade.sendCount(npcs.size);
 }
 
-function applyName(npc, payload) {
-  if (!npc || !payload || !payload.firstName) return;
-  const clean = String(payload.firstName)
+function cleanNamePart(value) {
+  return String(value || "")
+    .replace(/\+/g, " ")
+    .replace(/\s+/g, " ")
     .replace(/[^a-zA-Z0-9 '\-]/g, "")
-    .trim()
-    .slice(0, 14);
-  if (clean) npc.firstName = clean;
+    .trim();
+}
+
+function applyName(npc, payload) {
+  if (!npc || !payload) return;
+  let first = cleanNamePart(payload.firstName);
+  let last = cleanNamePart(payload.lastName);
+  if (first && !last) {
+    const parts = first.split(" ").filter(Boolean);
+    if (parts.length >= 2) {
+      first = parts[0];
+      last = parts.slice(1).join(" ");
+    }
+  }
+  if (first) npc.firstName = first;
+  if (last) npc.lastName = last;
+}
+
+function loadProductImage(url) {
+  if (!url) return Promise.resolve(null);
+  if (imageCache.has(url)) return imageCache.get(url);
+  const promise = new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+  imageCache.set(url, promise);
+  return promise;
+}
+
+function addCartItem(npc, payload) {
+  if (!npc) return;
+  if (!npc.items) npc.items = [];
+  const title = (payload && payload.productTitle) || "";
+  const imageUrl =
+    (payload && (payload.imageDataUrl || payload.imageUrl)) || "";
+  const productType = (payload && payload.productType) || "";
+  if (!title && !imageUrl) return;
+  const item = { title, imageUrl, productType, img: null };
+  npc.items.push(item);
+  if (npc.items.length > 8) npc.items.shift();
+  loadProductImage(imageUrl).then((img) => {
+    item.img = img;
+  });
+}
+
+function removeCartItem(npc, payload) {
+  if (!npc || !npc.items || !npc.items.length) return;
+  const title = payload && payload.productTitle;
+  let idx = -1;
+  if (title) {
+    idx = npc.items.findIndex((it) => it.title === title);
+  }
+  if (idx === -1) idx = npc.items.length - 1;
+  npc.items.splice(idx, 1);
+  if (!npc.items.length) {
+    npc.hadCart = false;
+    if (npc.state === "cart") npc.state = "idle";
+  }
 }
 
 function openDoor() {
+  if (settings.landmark !== "door") return;
   if (door.phase === "closed") {
     door.phase = "opening";
     door.t = 0;
@@ -113,6 +213,15 @@ function handleEvent(payload) {
     return;
   }
   if (payload.type === "hello") return;
+  if (payload.type === "clear") {
+    npcs.clear();
+    waiting.length = 0;
+    pendingCart.clear();
+    pendingName.clear();
+    pendingItems.clear();
+    reportCount();
+    return;
+  }
 
   const id = payload.sessionId || "anon";
   if (payload.type === "enter") {
@@ -121,10 +230,10 @@ function handleEvent(payload) {
   }
   if (payload.type === "heartbeat") {
     const npc = npcs.get(id);
-    if (npc) {
+    if (npc && npc.state !== "leaving") {
       npc.lastEvent = Date.now();
       applyName(npc, payload);
-    } else spawnOrRefresh(id, payload);
+    }
     return;
   }
   if (payload.type === "cart") {
@@ -133,6 +242,9 @@ function handleEvent(payload) {
     if (!npc || !npcs.has(id)) {
       pendingCart.add(id);
       if (payload.firstName) pendingName.set(id, payload.firstName);
+      const queued = pendingItems.get(id) || [];
+      queued.push(payload);
+      pendingItems.set(id, queued);
       return;
     }
     applyName(npc, payload);
@@ -140,15 +252,28 @@ function handleEvent(payload) {
     npc.productTitle = payload.productTitle || npc.productTitle;
     npc.lastEvent = Date.now();
     npc.facing = npc.facing || -1;
+    if (payload.productTitle || payload.imageUrl) addCartItem(npc, payload);
     if (npc.state !== "entering" && npc.state !== "celebrating" && npc.state !== "leaving") {
       npc.state = "cart";
     }
     ArcadeAudio.cart();
     return;
   }
+  if (payload.type === "cart_remove") {
+    const npc = npcs.get(id);
+    if (npc) {
+      npc.lastEvent = Date.now();
+      removeCartItem(npc, payload);
+    }
+    return;
+  }
   if (payload.type === "cart_empty") {
     const npc = npcs.get(id);
-    if (npc && npc.state === "cart") npc.state = "idle";
+    if (npc) {
+      npc.items = [];
+      npc.hadCart = false;
+      if (npc.state === "cart") npc.state = "idle";
+    }
     return;
   }
   if (payload.type === "purchase") {
@@ -165,8 +290,12 @@ function spawnOrRefresh(id, payload) {
   if (existing) {
     existing.lastEvent = Date.now();
     applyName(existing, payload);
-    if (existing.state === "leaving") {
-      existing.state = existing.hadCart ? "cart" : "idle";
+    if (
+      existing.state === "leaving" &&
+      payload &&
+      (payload.type === "enter" || payload.type === "cart")
+    ) {
+      existing.state = payload.type === "cart" || existing.hadCart ? "cart" : "idle";
     }
     return existing;
   }
@@ -189,6 +318,7 @@ function spawnOrRefresh(id, payload) {
     look: "side",
     browseT: 0,
     browseTarget: null,
+    items: [],
   };
   npcs.set(id, npc);
   applyName(npc, payload);
@@ -199,6 +329,10 @@ function spawnOrRefresh(id, payload) {
   if (pendingCart.has(id)) {
     npc.hadCart = true;
     pendingCart.delete(id);
+  }
+  if (pendingItems.has(id)) {
+    pendingItems.get(id).forEach((item) => addCartItem(npc, item));
+    pendingItems.delete(id);
   }
   openDoor();
   reportCount();
@@ -367,8 +501,7 @@ function drawSidewalk() {
 }
 
 function drawDoorSign(doorLeft, doorTop, faceWidth, doorH) {
-  const line1 = "ZANDMAN'S";
-  const line2 = "MAGIC SHOP";
+  const [line1, line2] = splitSignLines(settings.storeName);
   let scale = faceWidth >= 150 ? 2 : 1;
   let w1 = line1.length * 6 * scale;
   let w2 = line2.length * 6 * scale;
@@ -398,14 +531,74 @@ function drawDoorSign(doorLeft, doorTop, faceWidth, doorH) {
     scale,
     "#3a1c08"
   );
+  if (line2) {
+    drawPixelText(
+      ctx,
+      line2,
+      sx + Math.round((signW - w2) / 2),
+      sy + 3 * scale + 7 * scale + 2,
+      scale,
+      "#3a1c08"
+    );
+  }
+}
+
+function drawStreetSign() {
+  const [line1, line2] = splitSignLines(settings.storeName);
+  const scale = Math.max(line1.length, line2.length) > 14 ? 1 : 2;
+  const w1 = line1.length * 6 * scale;
+  const w2 = line2 ? line2.length * 6 * scale : 0;
+  const padX = 10;
+  const padY = 6;
+  const bladeW = Math.max(w1, w2) + padX * 2;
+  const bladeH = (line2 ? 2 : 1) * (7 * scale) + padY * 2 + (line2 ? 4 : 0);
+  const poleW = 8;
+  const poleX = stage.left + stage.width - 22 - poleW;
+  const poleBottom = groundY();
+  const poleTop = poleBottom - 210;
+  const bladeX = poleX - bladeW + 6;
+  const bladeY = poleTop + 18;
+  ctx.fillStyle = "#2b2b32";
+  ctx.fillRect(poleX, poleTop, poleW, poleBottom - poleTop);
+  ctx.fillStyle = "#5c5c66";
+  ctx.fillRect(poleX, poleTop, 2, poleBottom - poleTop);
+  ctx.fillStyle = "#1a1a20";
+  ctx.fillRect(poleX - 4, poleBottom - 8, poleW + 8, 8);
+  ctx.fillStyle = "#0d2a18";
+  ctx.fillRect(bladeX - 2, bladeY - 2, bladeW + 4, bladeH + 4);
+  ctx.fillStyle = "#1f7a44";
+  ctx.fillRect(bladeX, bladeY, bladeW, bladeH);
+  ctx.fillStyle = "#f4f7f2";
+  ctx.fillRect(bladeX, bladeY, bladeW, 2);
+  ctx.fillRect(bladeX, bladeY + bladeH - 2, bladeW, 2);
+  ctx.fillRect(bladeX, bladeY, 2, bladeH);
+  ctx.fillRect(bladeX + bladeW - 2, bladeY, 2, bladeH);
   drawPixelText(
     ctx,
-    line2,
-    sx + Math.round((signW - w2) / 2),
-    sy + 3 * scale + 7 * scale + 2,
+    line1,
+    bladeX + Math.round((bladeW - w1) / 2),
+    bladeY + padY,
     scale,
-    "#3a1c08"
+    "#f4f7f2"
   );
+  if (line2) {
+    drawPixelText(
+      ctx,
+      line2,
+      bladeX + Math.round((bladeW - w2) / 2),
+      bladeY + padY + 7 * scale + 4,
+      scale,
+      "#f4f7f2"
+    );
+  }
+}
+
+function drawLandmark() {
+  if (settings.landmark === "street") {
+    drawStreetSign();
+    return;
+  }
+  drawDoor();
 }
 
 function drawDoor() {
@@ -431,11 +624,14 @@ function spriteFor(npc) {
 
 function drawBubble(npc, x, y, width) {
   if (!npc.firstName) return;
-  const scale = 2;
-  const text = npc.firstName;
-  const tw = text.length * 6 * scale;
-  const padX = 7;
-  const padY = 5;
+  const scale = 1;
+  const text = npc.lastName
+    ? `${npc.firstName} ${npc.lastName}`
+    : npc.firstName;
+  const gaps = (text.match(/ /g) || []).length;
+  const tw = (text.length - gaps) * 6 * scale + gaps * 4 * scale;
+  const padX = 5;
+  const padY = 4;
   const bw = tw + padX * 2;
   const bh = 7 * scale + padY * 2;
   let bx = Math.round(x + width / 2 - bw / 2);
@@ -455,6 +651,46 @@ function drawBubble(npc, x, y, width) {
   drawPixelText(ctx, text, bx + padX, by + padY, scale, "#2a1810");
 }
 
+function drawCartItems(npc, x, y, width, height, flip) {
+  const items = npc.items || [];
+  if (!items.length) return;
+  const shown = items.slice(-4);
+  shown.forEach((item, i) => {
+    const kind = `${item.productType || ""} ${item.title || ""}`.toLowerCase();
+    const isBook = /book|novel|isbn|paperback|hardcover|fiction/.test(kind);
+    const iw = isBook ? 22 : 26;
+    const ih = isBook ? 32 : 26;
+    const localX = width * 0.62 + i * 8;
+    const localY = height * 0.34 - (i % 2) * 5;
+    const screenX = flip ? x + width - localX - iw : x + localX;
+    const screenY = y + localY;
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    ctx.translate(screenX + iw / 2, screenY + ih / 2);
+    ctx.rotate(flip ? -0.1 : 0.1);
+    if (item.img) {
+      ctx.drawImage(item.img, -iw / 2, -ih / 2, iw, ih);
+    } else {
+      ctx.fillStyle = "#6b3a1f";
+      ctx.fillRect(-iw / 2, -ih / 2, iw, ih);
+      ctx.fillStyle = "#fff1a8";
+      const letter = (item.title || "?").charAt(0).toUpperCase();
+      ctx.font = "12px monospace";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(letter, 0, 0);
+    }
+    ctx.strokeStyle = "#1a1020";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(-iw / 2 + 0.5, -ih / 2 + 0.5, iw - 1, ih - 1);
+    if (isBook) {
+      ctx.fillStyle = "rgba(20,10,8,0.45)";
+      ctx.fillRect(-iw / 2, -ih / 2, 3, ih);
+    }
+    ctx.restore();
+  });
+}
+
 function drawNpc(npc) {
   if (!sprites) return;
   const spr = spriteFor(npc);
@@ -465,6 +701,9 @@ function drawNpc(npc) {
   const y = groundY() - h - npc.bob - hop;
   const flip = npc.facing < 0;
   drawSprite(ctx, spr, x, y, h, flip);
+  if (npc.state === "cart" || (npc.hadCart && npc.state !== "idle" && npc.state !== "celebrating")) {
+    drawCartItems(npc, x, y, width, h, flip);
+  }
   drawBubble(npc, x, y, width);
   return width;
 }
@@ -495,7 +734,7 @@ function frame(now) {
 
   ctx.clearRect(0, 0, cssW, cssH);
   drawSidewalk();
-  drawDoor();
+  drawLandmark();
   const ordered = [...npcs.values()].sort((a, b) => a.x - b.x);
   for (const npc of ordered) drawNpc(npc);
   drawFireworks(ctx, rockets);
@@ -515,6 +754,7 @@ if (window.arcade) {
   window.arcade.onEvent(handleEvent);
   window.arcade.onQueryCount(reportCount);
   if (window.arcade.onLayout) window.arcade.onLayout(applyLayout);
+  if (window.arcade.onSettings) window.arcade.onSettings(applySettings);
 }
 
 requestAnimationFrame(frame);

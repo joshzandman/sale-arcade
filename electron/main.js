@@ -23,6 +23,9 @@ let muted = false;
 let visitorCount = 0;
 let lastSale = "None yet";
 let connected = false;
+let landmark = "door";
+let storeName = "Zandman's Magic Shop";
+let promptWin = null;
 
 function loadEnv() {
   const out = {};
@@ -102,11 +105,61 @@ function createOverlay() {
   return win;
 }
 
-function sendEvent(payload) {
+const STORE_HOST = "joshzandman.com";
+
+async function lookupProductImage(title) {
+  if (!title) return "";
+  try {
+    const url = `https://${STORE_HOST}/search/suggest.json?q=${encodeURIComponent(
+      title
+    )}&resources[type]=product&resources[limit]=1`;
+    const res = await fetch(url);
+    if (!res.ok) return "";
+    const data = await res.json();
+    const products =
+      (data.resources &&
+        data.resources.results &&
+        data.resources.results.products) ||
+      [];
+    const product = products[0];
+    if (!product) return "";
+    return product.image || product.featured_image || "";
+  } catch (err) {
+    console.error("product lookup failed", err);
+    return "";
+  }
+}
+
+async function fetchImageDataUrl(url) {
+  if (!url) return "";
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return "";
+    const buf = Buffer.from(await res.arrayBuffer());
+    const mime = res.headers.get("content-type") || "image/jpeg";
+    return `data:${mime};base64,${buf.toString("base64")}`;
+  } catch (err) {
+    console.error("image fetch failed", err);
+    return "";
+  }
+}
+
+async function enrichCart(payload) {
+  let imageUrl = payload.imageUrl || "";
+  if (!imageUrl && payload.productTitle) {
+    imageUrl = await lookupProductImage(payload.productTitle);
+  }
+  if (imageUrl && imageUrl.indexOf("data:") !== 0) {
+    payload.imageDataUrl = await fetchImageDataUrl(imageUrl);
+    payload.imageUrl = imageUrl;
+  }
+  return payload;
+}
+
+function deliverEvent(payload) {
   if (!overlay || overlay.isDestroyed()) return;
   overlay.webContents.send("arcade-event", { muted, ...payload });
   if (payload.type === "enter" || payload.type === "heartbeat") {
-    // renderer owns occupancy; ask for a count after a tick
     setTimeout(requestCount, 50);
   }
   if (payload.type === "purchase") {
@@ -117,9 +170,90 @@ function sendEvent(payload) {
   }
 }
 
+function sendEvent(payload) {
+  if (!overlay || overlay.isDestroyed()) return;
+  if (
+    payload.type === "cart" &&
+    (payload.imageUrl || payload.productTitle) &&
+    !payload.imageDataUrl
+  ) {
+    enrichCart(payload)
+      .then(deliverEvent)
+      .catch((err) => {
+        console.error("enrich cart failed", err);
+        deliverEvent(payload);
+      });
+    return;
+  }
+  deliverEvent(payload);
+}
+
 function requestCount() {
   if (!overlay || overlay.isDestroyed()) return;
   overlay.webContents.send("arcade-query-count");
+}
+
+function sendSettings() {
+  if (!overlay || overlay.isDestroyed()) return;
+  overlay.webContents.send("arcade-settings", { landmark, storeName });
+}
+
+function setLandmark(value) {
+  landmark = value === "street" ? "street" : "door";
+  saveState({ landmark });
+  sendSettings();
+  rebuildMenu();
+}
+
+function setStoreName(value) {
+  const next = String(value || "").trim().slice(0, 40);
+  if (!next) return;
+  storeName = next;
+  saveState({ storeName });
+  sendSettings();
+  rebuildMenu();
+}
+
+function askStoreName() {
+  if (promptWin && !promptWin.isDestroyed()) {
+    promptWin.focus();
+    return;
+  }
+  promptWin = new BrowserWindow({
+    width: 440,
+    height: 180,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    alwaysOnTop: true,
+    show: false,
+    title: "Store name",
+    webPreferences: {
+      preload: path.join(__dirname, "prompt-preload.js"),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  promptWin.setAlwaysOnTop(true, "screen-saver", 1);
+  promptWin.loadFile(path.join(__dirname, "prompt.html"));
+  promptWin.once("ready-to-show", () => {
+    promptWin.show();
+    promptWin.focus();
+  });
+  promptWin.webContents.on("did-finish-load", () => {
+    promptWin.webContents.send("prompt-init", storeName);
+  });
+  const onResult = (_event, value) => {
+    ipcMain.removeListener("prompt-result", onResult);
+    if (value) setStoreName(value);
+    if (promptWin && !promptWin.isDestroyed()) promptWin.close();
+  };
+  ipcMain.on("prompt-result", onResult);
+  promptWin.on("closed", () => {
+    ipcMain.removeListener("prompt-result", onResult);
+    promptWin = null;
+  });
 }
 
 function makeTrayIcon() {
@@ -140,51 +274,86 @@ function rebuildMenu() {
     { label: `Last sale: ${lastSale}`, enabled: false },
     { type: "separator" },
     {
-      label: "Test: visitor walks in",
-      click: () =>
-        sendEvent({
-          sessionId: `test-${Date.now()}`,
-          type: "enter",
-        }),
+      label: "Landmark",
+      submenu: [
+        {
+          label: "Door",
+          type: "radio",
+          checked: landmark === "door",
+          click: () => setLandmark("door"),
+        },
+        {
+          label: "Street sign",
+          type: "radio",
+          checked: landmark === "street",
+          click: () => setLandmark("street"),
+        },
+      ],
     },
     {
-      label: "Test: member walks in",
-      click: () =>
-        sendEvent({
-          sessionId: "test-member",
-          type: "enter",
-          firstName: "Josh",
-        }),
+      label: "Set store name…",
+      click: () => askStoreName(),
     },
     {
-      label: "Test: add to cart",
-      click: () => {
-        sendEvent({ sessionId: "test-cart", type: "enter" });
-        setTimeout(() => {
-          sendEvent({
-            sessionId: "test-cart",
-            type: "cart",
-            productTitle: "Test Tee",
-          });
-        }, 1400);
-      },
+      label: "Clear stage",
+      click: () => sendEvent({ type: "clear" }),
     },
+    { type: "separator" },
     {
-      label: "Test: fireworks / purchase",
-      click: () => {
-        sendEvent({
-          sessionId: "test-sale",
-          type: "enter",
-        });
-        setTimeout(() => {
-          sendEvent({
-            sessionId: "test-sale",
-            type: "purchase",
-            productTitle: "Test Tee",
-            total: "42.00",
-          });
-        }, 800);
-      },
+      label: "Test",
+      submenu: [
+        {
+          label: "Visitor walks in",
+          click: () =>
+            sendEvent({
+              sessionId: `test-${Date.now()}`,
+              type: "enter",
+            }),
+        },
+        {
+          label: "Member walks in",
+          click: () =>
+            sendEvent({
+              sessionId: "test-member",
+              type: "enter",
+              firstName: "Josh",
+              lastName: "Zandman",
+            }),
+        },
+        {
+          label: "Add to cart",
+          click: () => {
+            sendEvent({ sessionId: "test-cart", type: "enter" });
+            setTimeout(() => {
+              sendEvent({
+                sessionId: "test-cart",
+                type: "cart",
+                productTitle: "1984",
+                productType: "Book",
+                imageUrl:
+                  "https://cdn.shopify.com/s/files/1/0017/7514/0975/files/1984Cover.jpg?v=1692154466",
+              });
+            }, 1400);
+          },
+        },
+        {
+          label: "Fireworks / purchase",
+          click: () => {
+            sendEvent({
+              sessionId: "test-sale",
+              type: "enter",
+            });
+            setTimeout(() => {
+              sendEvent({
+                sessionId: "test-sale",
+                type: "purchase",
+                productTitle: "Test Tee",
+                total: "42.00",
+              });
+            }, 800);
+          },
+        },
+      ],
     },
     { type: "separator" },
     {
@@ -271,6 +440,11 @@ ipcMain.on("arcade-count", (_event, count) => {
 
 app.whenReady().then(() => {
   const env = { ...process.env, ...loadEnv() };
+  const saved = loadState();
+  if (saved.landmark === "street" || saved.landmark === "door") {
+    landmark = saved.landmark;
+  }
+  if (saved.storeName) storeName = String(saved.storeName).slice(0, 40);
   app.setName("Sale Arcade");
   if (process.platform === "darwin") app.dock.hide();
 
@@ -283,6 +457,7 @@ app.whenReady().then(() => {
 
   overlay.webContents.on("did-finish-load", () => {
     sendLayout();
+    sendSettings();
     sendEvent({ type: "mute", muted });
     if (process.argv.includes("--demo")) {
       sendEvent({ sessionId: "demo-1", type: "enter" });
