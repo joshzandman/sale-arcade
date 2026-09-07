@@ -51,6 +51,9 @@ function send(type, extra) {
       currentPage,
       extra || {}
     );
+    if (type === "cart_remove" || type === "cart_sync") {
+      body.productTitle = extra && extra.productTitle ? extra.productTitle : "";
+    }
     if (!body.firstName && cookieName) body.firstName = cookieName;
     if (body.firstName) body.firstName = String(body.firstName).slice(0, 40);
     if (body.lastName) body.lastName = String(body.lastName).slice(0, 40);
@@ -146,15 +149,35 @@ function cartLinePayload(event) {
   return linePayload(line);
 }
 
+function cartLines(cart) {
+  if (!cart) return [];
+  if (Array.isArray(cart.lines)) return cart.lines;
+  const edges = cart.lines && cart.lines.edges;
+  if (!Array.isArray(edges)) return [];
+  const lines = [];
+  for (let i = 0; i < edges.length; i += 1) {
+    const edge = edges[i];
+    if (edge && edge.node) lines.push(edge.node);
+    else if (edge) lines.push(edge);
+  }
+  return lines;
+}
+
 function cartItemsPayload(event) {
   const cart = event.data && event.data.cart;
-  const lines = (cart && cart.lines) || [];
+  const lines = cartLines(cart);
   const items = [];
   for (let i = 0; i < lines.length && items.length < 8; i += 1) {
     const item = linePayload(lines[i]);
     if (item.productTitle || item.imageUrl) items.push(item);
   }
-  return { items: items };
+  let totalQuantity = -1;
+  if (cart && cart.totalQuantity !== undefined && cart.totalQuantity !== null) {
+    totalQuantity = Number(cart.totalQuantity);
+  } else if (items.length) {
+    totalQuantity = items.length;
+  }
+  return { items: items, totalQuantity: totalQuantity };
 }
 
 analytics.subscribe("product_added_to_cart", function (event) {
@@ -166,7 +189,9 @@ analytics.subscribe("product_removed_from_cart", function (event) {
 });
 
 analytics.subscribe("cart_viewed", function (event) {
-  send("cart_sync", cartItemsPayload(event));
+  const payload = cartItemsPayload(event);
+  if (!payload.items.length && payload.totalQuantity !== 0) return;
+  send("cart_sync", payload);
 });
 
 analytics.subscribe("checkout_started", function () {

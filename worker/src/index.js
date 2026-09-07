@@ -143,6 +143,10 @@ export class ArcadeRoom {
           ? String(body.collectionTitle).slice(0, 80)
           : undefined,
         quantity: body.quantity ? Number(body.quantity) || undefined : undefined,
+        totalQuantity:
+          body.totalQuantity === undefined || body.totalQuantity === null
+            ? undefined
+            : Number(body.totalQuantity),
         items: sanitizeItems(body.items),
         city: cf.city ? String(cf.city).slice(0, 40) : undefined,
         region: cf.region ? String(cf.region).slice(0, 40) : undefined,

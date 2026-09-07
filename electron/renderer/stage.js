@@ -406,23 +406,24 @@ function removeCartItem(npc, payload) {
     return;
   }
   const item = npc.items[idx];
-  const qty = Math.max(1, Number(payload && payload.quantity) || 1);
-  item.qty = (item.qty || 1) - qty;
+  item.qty = (item.qty || 1) - 1;
   if (item.qty <= 0) npc.items.splice(idx, 1);
   applyCartPresence(npc);
 }
 
 function replaceCartItems(npc, items) {
   if (!npc) return;
+  const prev = npc.items || [];
   npc.items = [];
   (items || []).forEach((item) => {
     addCartItem(npc, {
       productTitle: item.productTitle || item.title,
       imageUrl: item.imageDataUrl || item.imageUrl,
       productType: item.productType,
-      quantity: item.quantity || item.qty,
+      quantity: item.quantity || item.qty || 1,
     });
   });
+  if (items && items.length && !npc.items.length) npc.items = prev;
   applyCartPresence(npc);
 }
 
@@ -547,7 +548,11 @@ function handleEvent(payload) {
         forgetVisitor(id);
         return;
       }
-      replaceCartItems(npc, payload.items || []);
+      const incoming = Array.isArray(payload.items) ? payload.items : null;
+      if (!incoming) return;
+      const totalQty = Number(payload.totalQuantity);
+      if (!incoming.length && totalQty !== 0) return;
+      replaceCartItems(npc, incoming);
     }
     return;
   }
@@ -1029,7 +1034,7 @@ function drawDoor() {
 
 function spriteFor(npc) {
   if (npc.state === "celebrating") return sprites.celebrate;
-  if (npc.state === "cart" || (hasCart(npc) && npc.state !== "idle")) return sprites.cart;
+  if (hasCart(npc) || npc.state === "cart") return sprites.cart;
   if (npc.state === "idle" && npc.look === "up" && sprites.look) return sprites.look;
   return sprites.idle;
 }
