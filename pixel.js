@@ -1,15 +1,24 @@
-// Paste this into Shopify Admin → Settings → Customer events → Add custom pixel.
-// Set permission to Analytics. Replace the two constants after you deploy the worker.
+// Template. Use pixel-live.js (with real ENDPOINT/SECRET) in Shopify Admin.
 
 const ENDPOINT = "https://sale-arcade.YOUR_SUBDOMAIN.workers.dev/event";
 const SECRET = "change-me-to-a-long-random-string";
 
 function uuid() {
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
     const r = (Math.random() * 16) | 0;
     const v = c === "x" ? r : (r & 0x3) | 0x8;
     return v.toString(16);
   });
+}
+
+function pick(obj, keys) {
+  let cur = obj;
+  for (let i = 0; i < keys.length; i += 1) {
+    if (!cur) return "";
+    cur = cur[keys[i]];
+  }
+  if (cur === undefined || cur === null) return "";
+  return String(cur);
 }
 
 async function sessionId() {
@@ -26,25 +35,26 @@ async function memberName() {
     const cookie = await browser.cookie.get("sale_arcade_name");
     if (cookie) return decodeURIComponent(cookie).trim();
   } catch (err) {
-    /* no cookie access */
+    return "";
   }
   return "";
 }
 
 function send(type, extra) {
-  Promise.all([sessionId(), memberName()]).then(([sid, cookieName]) => {
-    const body = Object.assign({ sessionId: sid, type }, extra || {});
+  Promise.all([sessionId(), memberName()]).then(function (parts) {
+    const sid = parts[0];
+    const cookieName = parts[1];
+    const body = Object.assign(
+      { sessionId: sid, type: type, secret: SECRET },
+      extra || {}
+    );
     const firstName = body.firstName || cookieName;
     if (firstName) body.firstName = String(firstName).slice(0, 24);
     fetch(ENDPOINT, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: "Bearer " + SECRET,
-      },
       body: JSON.stringify(body),
       keepalive: true,
-    }).catch(() => {});
+    }).catch(function () {});
   });
 }
 
@@ -53,13 +63,15 @@ function startHeartbeat() {
   if (beating) return;
   beating = true;
   try {
-    setInterval(() => send("heartbeat"), 10000);
+    setInterval(function () {
+      send("heartbeat");
+    }, 10000);
   } catch (err) {
-    /* sandbox may block timers; page_viewed still pings */
+    return;
   }
 }
 
-analytics.subscribe("page_viewed", async () => {
+analytics.subscribe("page_viewed", async function () {
   const flag = await browser.sessionStorage.getItem("sale_arcade_entered");
   if (!flag) {
     await browser.sessionStorage.setItem("sale_arcade_entered", "1");
@@ -70,43 +82,30 @@ analytics.subscribe("page_viewed", async () => {
   startHeartbeat();
 });
 
-analytics.subscribe("product_added_to_cart", (event) => {
-  const title =
-    (event.data &&
-      event.data.cartLine &&
-      event.data.cartLine.merchandise &&
-      (event.data.cartLine.merchandise.product &&
-        event.data.cartLine.merchandise.product.title)) ||
-    "";
-  send("cart", { productTitle: title });
+analytics.subscribe("product_added_to_cart", function (event) {
+  send("cart", {
+    productTitle: pick(event, ["data", "cartLine", "merchandise", "product", "title"]),
+  });
 });
 
-analytics.subscribe("product_removed_from_cart", () => {
+analytics.subscribe("product_removed_from_cart", function () {
   send("cart_empty");
 });
 
-analytics.subscribe("checkout_started", () => {
+analytics.subscribe("checkout_started", function () {
   send("cart");
 });
 
-analytics.subscribe("checkout_completed", (event) => {
+analytics.subscribe("checkout_completed", function (event) {
   const checkout = event.data && event.data.checkout;
-  const total =
-    checkout && checkout.totalPrice && checkout.totalPrice.amount
-      ? String(checkout.totalPrice.amount)
-      : "";
-  const first = checkout && checkout.lineItems && checkout.lineItems[0];
-  const title =
-    (first && first.title) ||
-    (first && first.variant && first.variant.product && first.variant.product.title) ||
-    "";
-  const firstName =
-    (checkout &&
-      checkout.billingAddress &&
-      checkout.billingAddress.firstName) ||
-    (checkout &&
-      checkout.shippingAddress &&
-      checkout.shippingAddress.firstName) ||
-    "";
-  send("purchase", { total, productTitle: title, firstName });
+  const total = pick(checkout, ["totalPrice", "amount"]);
+  let title = pick(checkout, ["lineItems", "0", "title"]);
+  if (!title) {
+    title = pick(checkout, ["lineItems", "0", "variant", "product", "title"]);
+  }
+  let firstName = pick(checkout, ["billingAddress", "firstName"]);
+  if (!firstName) {
+    firstName = pick(checkout, ["shippingAddress", "firstName"]);
+  }
+  send("purchase", { total: total, productTitle: title, firstName: firstName });
 });

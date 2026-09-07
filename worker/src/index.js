@@ -48,18 +48,19 @@ export class ArcadeRoom {
     }
 
     if (url.pathname === "/event" && request.method === "POST") {
-      const secret = (request.headers.get("Authorization") || "").replace(
-        "Bearer ",
-        ""
-      );
-      if (!this.env.SHARED_SECRET || secret !== this.env.SHARED_SECRET) {
-        return cors(JSON.stringify({ error: "unauthorized" }), 401);
-      }
       let body;
       try {
-        body = await request.json();
+        const raw = await request.text();
+        body = raw ? JSON.parse(raw) : {};
       } catch {
         return cors(JSON.stringify({ error: "invalid json" }), 400);
+      }
+      const secret =
+        (body && body.secret) ||
+        url.searchParams.get("secret") ||
+        (request.headers.get("Authorization") || "").replace("Bearer ", "");
+      if (!this.env.SHARED_SECRET || secret !== this.env.SHARED_SECRET) {
+        return cors(JSON.stringify({ error: "unauthorized" }), 401);
       }
       if (!body || !body.type || !body.sessionId) {
         return cors(JSON.stringify({ error: "need type and sessionId" }), 400);

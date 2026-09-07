@@ -1,6 +1,8 @@
 name = "sale-arcade"
 main = "src/index.js"
 compatibility_date = "2025-04-01"
+account_id = "26bad06e4ccea4d365669db778eb7927"
+workers_dev = true
 
 [durable_objects]
 bindings = [{ name = "ARCADE", class_name = "ArcadeRoom" }]

@@ -237,11 +237,13 @@ function connectWorker(env) {
 
   socket.on("open", () => {
     connected = true;
+    console.log("arcade connected", url);
     rebuildMenu();
   });
   socket.on("message", (data) => {
     try {
       const payload = JSON.parse(String(data));
+      console.log("arcade event", payload && payload.type, payload && payload.sessionId);
       if (payload && payload.type) sendEvent(payload);
     } catch (err) {
       console.error("bad event", err);
