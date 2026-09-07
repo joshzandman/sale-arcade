@@ -217,7 +217,7 @@ function visitInfo(payload, npc) {
   }
   return {
     kind: isProduct ? "viewing" : "browsing",
-    title: String(title).slice(0, 32),
+    title: String(title).slice(0, 64),
   };
 }
 
@@ -225,6 +225,35 @@ function hoverViewLine(npc) {
   const kind = npc.viewKind === "viewing" ? "Viewing" : "Browsing";
   const title = npc.viewing || "Home";
   return `${kind} ${title}`;
+}
+
+function wrapPixelText(text, scale, maxWidth, maxLines) {
+  const raw = String(text || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!raw) return [""];
+  const limit = maxLines || 3;
+  const lines = [];
+  let rest = raw;
+  while (rest && lines.length < limit) {
+    if (measurePixelText(rest, scale) <= maxWidth) {
+      lines.push(rest);
+      break;
+    }
+    let cut = rest.length;
+    while (cut > 1 && measurePixelText(rest.slice(0, cut), scale) > maxWidth) {
+      cut -= 1;
+    }
+    let piece = rest.slice(0, cut);
+    const space = piece.lastIndexOf(" ");
+    if (space >= 6) {
+      piece = piece.slice(0, space);
+      cut = piece.length;
+    }
+    lines.push(piece.trim());
+    rest = rest.slice(cut).trim();
+  }
+  return lines.length ? lines : [raw];
 }
 
 function normalizePlace(value) {
@@ -1155,31 +1184,34 @@ function drawNpc(npc) {
 function hoverCardLines(npc) {
   const items = npc.items || [];
   const scale = 1;
-  const lines = [
-    {
-      text: hoverViewLine(npc).slice(0, 28),
-      color: "#fff1a8",
-      scale,
-      align: "center",
-    },
-  ];
+  const maxW = 26 * 6 * scale;
+  const lines = wrapPixelText(hoverViewLine(npc), scale, maxW, 3).map((text) => ({
+    text,
+    color: "#fff1a8",
+    scale,
+    align: "center",
+  }));
   const loc = locationLabel(npc);
   if (loc) {
-    lines.push({
-      text: String(loc).slice(0, 22),
-      color: "#c8d4e8",
-      scale,
-      align: "center",
+    wrapPixelText(String(loc), scale, maxW, 2).forEach((text) => {
+      lines.push({
+        text,
+        color: "#c8d4e8",
+        scale,
+        align: "center",
+      });
     });
   }
   items.slice(0, 6).forEach((item) => {
     let label = item.title || "Item";
     if ((item.qty || 1) > 1) label = `${label} x${item.qty}`;
-    lines.push({
-      text: String(label).slice(0, 28),
-      color: "#ffe0a0",
-      scale,
-      align: "left",
+    wrapPixelText(label, scale, maxW, 2).forEach((text) => {
+      lines.push({
+        text,
+        color: "#ffe0a0",
+        scale,
+        align: "left",
+      });
     });
   });
   return lines;
