@@ -187,6 +187,15 @@ function sendEvent(payload) {
       });
     return;
   }
+  if (payload.type === "cart_sync" && Array.isArray(payload.items)) {
+    Promise.all(payload.items.map((item) => enrichCart({ ...item })))
+      .then((items) => deliverEvent({ ...payload, items }))
+      .catch((err) => {
+        console.error("enrich cart sync failed", err);
+        deliverEvent(payload);
+      });
+    return;
+  }
   deliverEvent(payload);
 }
 
@@ -334,6 +343,8 @@ function rebuildMenu() {
               firstName: "Josh",
               lastName: "Zandman",
               productTitle: "1984",
+              pageUrl: "https://joshzandman.com/products/1984",
+              pageTitle: "1984",
               city: "Nashville",
               regionCode: "TN",
               country: "US",
@@ -342,18 +353,47 @@ function rebuildMenu() {
         {
           label: "Add to cart",
           click: () => {
-            sendEvent({ sessionId: "test-cart", type: "enter" });
+            sendEvent({
+              sessionId: "test-cart",
+              type: "enter",
+              collectionTitle: "Best Sellers",
+              pageUrl: "https://joshzandman.com/collections/best-sellers",
+              pageTitle: "Best Sellers",
+            });
             setTimeout(() => {
               sendEvent({
                 sessionId: "test-cart",
                 type: "cart",
                 productTitle: "1984",
                 productType: "Book",
+                pageUrl: "https://joshzandman.com/collections/best-sellers",
+                collectionTitle: "Best Sellers",
                 imageUrl:
                   "https://cdn.shopify.com/s/files/1/0017/7514/0975/files/1984Cover.jpg?v=1692154466",
               });
             }, 1400);
+            setTimeout(() => {
+              sendEvent({
+                sessionId: "test-cart",
+                type: "cart",
+                productTitle: "The Hobbit",
+                productType: "Book",
+                pageUrl: "https://joshzandman.com/collections/best-sellers",
+                collectionTitle: "Best Sellers",
+              });
+            }, 2200);
           },
+        },
+        {
+          label: "Remove from cart",
+          click: () =>
+            sendEvent({
+              sessionId: "test-cart",
+              type: "cart_remove",
+              productTitle: "1984",
+              pageUrl: "https://joshzandman.com/collections/best-sellers",
+              collectionTitle: "Best Sellers",
+            }),
         },
         {
           label: "Fireworks / purchase",

@@ -8,6 +8,28 @@ function sanitizeImageUrl(url) {
   return value;
 }
 
+function sanitizeItems(raw) {
+  if (!Array.isArray(raw)) return undefined;
+  const items = [];
+  for (const row of raw.slice(0, 8)) {
+    if (!row || typeof row !== "object") continue;
+    const rawTitle = row.productTitle || row.title;
+    const productTitle = rawTitle ? String(rawTitle).slice(0, 80) : "";
+    const imageUrl = sanitizeImageUrl(row.imageUrl);
+    if (!productTitle && !imageUrl) continue;
+    const qty = Number(row.quantity || row.qty);
+    items.push({
+      productTitle: productTitle || undefined,
+      productType: row.productType
+        ? String(row.productType).slice(0, 40)
+        : undefined,
+      imageUrl,
+      quantity: Number.isFinite(qty) ? Math.min(99, Math.max(1, qty)) : 1,
+    });
+  }
+  return items;
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
@@ -97,6 +119,11 @@ export class ArcadeRoom {
         pageTitle: body.pageTitle
           ? String(body.pageTitle).slice(0, 80)
           : undefined,
+        collectionTitle: body.collectionTitle
+          ? String(body.collectionTitle).slice(0, 80)
+          : undefined,
+        quantity: body.quantity ? Number(body.quantity) || undefined : undefined,
+        items: sanitizeItems(body.items),
         city: cf.city ? String(cf.city).slice(0, 40) : undefined,
         region: cf.region ? String(cf.region).slice(0, 40) : undefined,
         regionCode: cf.regionCode ? String(cf.regionCode).slice(0, 8) : undefined,

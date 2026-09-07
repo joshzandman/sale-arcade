@@ -156,31 +156,76 @@ function cleanNamePart(value) {
     .trim();
 }
 
-function viewingLabel(payload, npc) {
-  if (payload.productTitle) return String(payload.productTitle).slice(0, 28);
-  if (payload.pageTitle) {
-    return String(payload.pageTitle)
-      .split(/\s+[|\-–—]\s+/)[0]
-      .slice(0, 28);
+function urlPath(url) {
+  try {
+    return new URL(url).pathname.split("/").filter(Boolean);
+  } catch (err) {
+    return [];
   }
-  if (payload.pageUrl) {
-    try {
-      const path = new URL(payload.pageUrl).pathname.split("/").filter(Boolean);
-      if (!path.length) return "Home";
-      if (path[0] === "products" && path[1]) {
-        return decodeURIComponent(path[1]).replace(/-/g, " ").slice(0, 28);
-      }
-      if (path[0] === "collections" && path[1]) {
-        return decodeURIComponent(path[1]).replace(/-/g, " ").slice(0, 28);
-      }
-      return decodeURIComponent(path[path.length - 1])
-        .replace(/-/g, " ")
-        .slice(0, 28);
-    } catch (err) {
-      return "";
-    }
+}
+
+function prettySlug(slug) {
+  try {
+    return decodeURIComponent(String(slug || ""))
+      .replace(/-/g, " ")
+      .trim();
+  } catch (err) {
+    return String(slug || "").replace(/-/g, " ").trim();
   }
-  return (npc && npc.viewing) || "";
+}
+
+function cleanPageTitle(title) {
+  return String(title || "")
+    .split(/\s+[|\-–—]\s+/)[0]
+    .trim();
+}
+
+function cartishType(type) {
+  return (
+    type === "cart" ||
+    type === "cart_remove" ||
+    type === "cart_sync" ||
+    type === "cart_empty" ||
+    type === "purchase"
+  );
+}
+
+function visitInfo(payload, npc) {
+  const hasUrl = Boolean(payload.pageUrl);
+  const path = hasUrl ? urlPath(payload.pageUrl) : [];
+  const useProductTitle = payload.productTitle && !cartishType(payload.type);
+  const isProduct = Boolean(useProductTitle) || path[0] === "products";
+  let title = "";
+  if (isProduct) {
+    title = payload.productTitle || prettySlug(path[1]) || "";
+  } else if (payload.collectionTitle) {
+    title = String(payload.collectionTitle);
+  } else if (hasUrl && !path.length) {
+    title = "Home";
+  } else if (path[0] === "collections" && path[1]) {
+    title = prettySlug(path[1]);
+  } else if (path[0] === "cart") {
+    title = "Cart";
+  } else if (payload.pageTitle) {
+    title = cleanPageTitle(payload.pageTitle);
+  } else if (path.length) {
+    title = prettySlug(path[path.length - 1]);
+  }
+  if (!title) {
+    return npc
+      ? { kind: npc.viewKind || "browsing", title: npc.viewing || "Home" }
+      : { kind: "browsing", title: "Home" };
+  }
+  return {
+    kind: isProduct ? "viewing" : "browsing",
+    title: String(title).slice(0, 32),
+  };
+}
+
+function hoverViewLine(npc) {
+  const kind = npc.viewKind === "viewing" ? "Viewing" : "Browsing";
+  const title = npc.viewing || "Home";
+  return `${kind} ${title}`;
 }
 
 function locationLabel(npc) {
@@ -205,8 +250,11 @@ function locationLabel(npc) {
 
 function applyVisit(npc, payload) {
   if (!npc || !payload) return;
-  const view = viewingLabel(payload, npc);
-  if (view) npc.viewing = view;
+  const info = visitInfo(payload, npc);
+  if (info && info.title) {
+    npc.viewing = info.title;
+    npc.viewKind = info.kind;
+  }
   if (payload.city) npc.city = payload.city;
   if (payload.region) npc.region = payload.region;
   if (payload.regionCode) npc.regionCode = payload.regionCode;
@@ -241,6 +289,51 @@ function loadProductImage(url) {
   return promise;
 }
 
+function hasCart(npc) {
+  return Boolean(npc && npc.items && npc.items.length);
+}
+
+function applyCartPresence(npc) {
+  if (!npc) return;
+  if (hasCart(npc)) {
+    npc.hadCart = true;
+    if (npc.state === "idle") npc.state = "cart";
+  } else {
+    npc.hadCart = false;
+    if (npc.state === "cart") npc.state = "idle";
+  }
+}
+
+function normalizeTitle(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function findCartItem(items, payload, loose) {
+  const title = normalizeTitle(payload && payload.productTitle);
+  const image = (payload && (payload.imageDataUrl || payload.imageUrl)) || "";
+  if (title) {
+    let idx = items.findIndex((it) => normalizeTitle(it.title) === title);
+    if (idx >= 0) return idx;
+    if (loose) {
+      idx = items.findIndex((it) => {
+        const name = normalizeTitle(it.title);
+        return name && (name.indexOf(title) >= 0 || title.indexOf(name) >= 0);
+      });
+      if (idx >= 0) return idx;
+    }
+  }
+  if (image) {
+    const idx = items.findIndex(
+      (it) => it.imageUrl === image || it.imageDataUrl === image
+    );
+    if (idx >= 0) return idx;
+  }
+  return -1;
+}
+
 function addCartItem(npc, payload) {
   if (!npc) return;
   if (!npc.items) npc.items = [];
@@ -248,28 +341,56 @@ function addCartItem(npc, payload) {
   const imageUrl =
     (payload && (payload.imageDataUrl || payload.imageUrl)) || "";
   const productType = (payload && payload.productType) || "";
+  const qty = Math.max(1, Number(payload && payload.quantity) || 1);
   if (!title && !imageUrl) return;
-  const item = { title, imageUrl, productType, img: null };
+  const idx = title ? findCartItem(npc.items, payload, false) : -1;
+  if (idx >= 0) {
+    const existing = npc.items[idx];
+    existing.qty = (existing.qty || 1) + qty;
+    if (imageUrl && !existing.img) {
+      existing.imageUrl = imageUrl;
+      loadProductImage(imageUrl).then((img) => {
+        existing.img = img;
+      });
+    }
+    applyCartPresence(npc);
+    return;
+  }
+  const item = { title, imageUrl, productType, qty, img: null };
   npc.items.push(item);
   if (npc.items.length > 8) npc.items.shift();
   loadProductImage(imageUrl).then((img) => {
     item.img = img;
   });
+  applyCartPresence(npc);
 }
 
 function removeCartItem(npc, payload) {
   if (!npc || !npc.items || !npc.items.length) return;
-  const title = payload && payload.productTitle;
-  let idx = -1;
-  if (title) {
-    idx = npc.items.findIndex((it) => it.title === title);
+  const idx = findCartItem(npc.items, payload, true);
+  if (idx < 0) {
+    applyCartPresence(npc);
+    return;
   }
-  if (idx === -1) idx = npc.items.length - 1;
-  npc.items.splice(idx, 1);
-  if (!npc.items.length) {
-    npc.hadCart = false;
-    if (npc.state === "cart") npc.state = "idle";
-  }
+  const item = npc.items[idx];
+  const qty = Math.max(1, Number(payload && payload.quantity) || 1);
+  item.qty = (item.qty || 1) - qty;
+  if (item.qty <= 0) npc.items.splice(idx, 1);
+  applyCartPresence(npc);
+}
+
+function replaceCartItems(npc, items) {
+  if (!npc) return;
+  npc.items = [];
+  (items || []).forEach((item) => {
+    addCartItem(npc, {
+      productTitle: item.productTitle || item.title,
+      imageUrl: item.imageDataUrl || item.imageUrl,
+      productType: item.productType,
+      quantity: item.quantity || item.qty,
+    });
+  });
+  applyCartPresence(npc);
 }
 
 function openDoor() {
@@ -324,7 +445,7 @@ function handleEvent(payload) {
     spawnOrRefresh(id, payload);
     return;
   }
-  if (payload.type === "view") {
+  if (payload.type === "view" || payload.type === "browse") {
     const npc = npcs.get(id) || spawnOrRefresh(id, payload);
     if (npc && npcs.has(id)) {
       npc.lastEvent = Date.now();
@@ -370,7 +491,19 @@ function handleEvent(payload) {
     const npc = npcs.get(id);
     if (npc) {
       npc.lastEvent = Date.now();
+      applyVisit(npc, payload);
       removeCartItem(npc, payload);
+    }
+    return;
+  }
+  if (payload.type === "cart_sync") {
+    let npc = npcs.get(id);
+    if (!npc) npc = spawnOrRefresh(id, payload);
+    if (npc && npcs.has(id)) {
+      npc.lastEvent = Date.now();
+      applyName(npc, payload);
+      applyVisit(npc, payload);
+      replaceCartItems(npc, payload.items || []);
     }
     return;
   }
@@ -378,8 +511,7 @@ function handleEvent(payload) {
     const npc = npcs.get(id);
     if (npc) {
       npc.items = [];
-      npc.hadCart = false;
-      if (npc.state === "cart") npc.state = "idle";
+      applyCartPresence(npc);
     }
     return;
   }
@@ -845,7 +977,7 @@ function drawDoor() {
 
 function spriteFor(npc) {
   if (npc.state === "celebrating") return sprites.celebrate;
-  if (npc.state === "cart" || (npc.hadCart && npc.state !== "idle")) return sprites.cart;
+  if (npc.state === "cart" || (hasCart(npc) && npc.state !== "idle")) return sprites.cart;
   if (npc.state === "idle" && npc.look === "up" && sprites.look) return sprites.look;
   return sprites.idle;
 }
@@ -945,7 +1077,7 @@ function drawNpc(npc) {
   const y = groundY() - h - npc.bob - hop;
   const flip = npc.facing < 0;
   drawSprite(ctx, spr, x, y, h, flip);
-  if (npc.state === "cart" || (npc.hadCart && npc.state !== "idle" && npc.state !== "celebrating")) {
+  if (hasCart(npc) && npc.state !== "celebrating") {
     drawCartItems(npc, x, y, width, h, flip);
   }
   drawBubble(npc, x, y, width);
@@ -984,19 +1116,54 @@ function hitNpc(mx, my) {
   return found;
 }
 
-function drawHoverCard(npc) {
-  const view = npc.viewing || "Browsing";
+function hoverCardLines(npc) {
+  const items = npc.items || [];
+  const small = items.length > 1;
+  const headScale = small ? 1 : 2;
+  const lines = [
+    {
+      text: hoverViewLine(npc).slice(0, small ? 28 : 22),
+      color: "#fff1a8",
+      scale: headScale,
+      align: "center",
+    },
+  ];
   const loc = locationLabel(npc);
-  const scale = 2;
-  const line1 = String(view).slice(0, 22);
-  const line2 = loc ? String(loc).slice(0, 22) : "";
-  const w1 = measurePixelText(line1, scale);
-  const w2 = line2 ? measurePixelText(line2, scale) : 0;
-  const tw = Math.max(w1, w2);
+  if (loc) {
+    lines.push({
+      text: String(loc).slice(0, 22),
+      color: "#c8d4e8",
+      scale: headScale,
+      align: "center",
+    });
+  }
+  items.slice(0, 6).forEach((item) => {
+    let label = item.title || "Item";
+    if ((item.qty || 1) > 1) label = `${label} x${item.qty}`;
+    lines.push({
+      text: String(label).slice(0, small ? 28 : 22),
+      color: "#ffe0a0",
+      scale: 1,
+      align: "left",
+    });
+  });
+  return lines;
+}
+
+function drawHoverCard(npc) {
+  const lines = hoverCardLines(npc);
   const padX = 8;
   const padY = 6;
+  const gap = 3;
+  const widths = lines.map((line) => measurePixelText(line.text, line.scale));
+  const tw = Math.max.apply(null, widths.concat([0]));
   const bw = tw + padX * 2;
-  const bh = (line2 ? 2 : 1) * (7 * scale) + padY * 2 + (line2 ? 4 : 0);
+  let contentH = 0;
+  lines.forEach((line, i) => {
+    contentH += 7 * line.scale;
+    if (i < lines.length - 1) contentH += gap;
+  });
+  const bh = contentH + padY * 2;
   const b = npc.bounds || { x: npc.x, y: groundY() - NPC_H, w: 80 };
   const nameLift = npc.firstName ? 52 : 0;
   let bx = Math.round(b.x + b.w / 2 - bw / 2);
@@ -1009,17 +1176,15 @@ function drawHoverCard(npc) {
   ctx.fillRect(bx, by, bw, bh);
   ctx.fillStyle = "#6b5a3a";
   ctx.fillRect(bx, by, bw, 2);
-  drawPixelText(ctx, line1, bx + Math.round((bw - w1) / 2), by + padY, scale, "#fff1a8");
-  if (line2) {
-    drawPixelText(
-      ctx,
-      line2,
-      bx + Math.round((bw - w2) / 2),
-      by + padY + 7 * scale + 4,
-      scale,
-      "#c8d4e8"
-    );
-  }
+  let y = by + padY;
+  lines.forEach((line, i) => {
+    const textX =
+      line.align === "left"
+        ? bx + padX
+        : bx + Math.round((bw - widths[i]) / 2);
+    drawPixelText(ctx, line.text, textX, y, line.scale, line.color);
+    y += 7 * line.scale + gap;
+  });
   hoverCardBounds = { x: bx - 8, y: by - 8, w: bw + 16, h: bh + 16 };
 }
 

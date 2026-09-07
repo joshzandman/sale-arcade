@@ -67,7 +67,12 @@ function send(type, extra) {
 }
 
 let beating = false;
-let currentPage = { pageUrl: "", pageTitle: "", productTitle: "" };
+let currentPage = {
+  pageUrl: "",
+  pageTitle: "",
+  productTitle: "",
+  collectionTitle: "",
+};
 
 function pageInfo(event) {
   let pageUrl = pick(event, ["context", "document", "location", "href"]);
@@ -89,28 +94,67 @@ function startHeartbeat() {
 }
 
 analytics.subscribe("page_viewed", function (event) {
-  currentPage = Object.assign(pageInfo(event), { productTitle: "" });
+  currentPage = Object.assign(pageInfo(event), {
+    productTitle: "",
+    collectionTitle: "",
+  });
   send("enter", currentPage);
   startHeartbeat();
 });
 
 analytics.subscribe("product_viewed", function (event) {
   const title = pick(event, ["data", "productVariant", "product", "title"]);
-  currentPage = Object.assign(pageInfo(event), { productTitle: title });
+  currentPage = Object.assign(pageInfo(event), {
+    productTitle: title,
+    collectionTitle: "",
+  });
   send("view", currentPage);
 });
 
-function cartLinePayload(event) {
-  let imageUrl = pick(event, ["data", "cartLine", "merchandise", "image", "src"]);
-  if (!imageUrl) {
-    imageUrl = pick(event, ["data", "cartLine", "merchandise", "image", "url"]);
+analytics.subscribe("collection_viewed", function (event) {
+  const title = pick(event, ["data", "collection", "title"]);
+  currentPage = Object.assign(pageInfo(event), {
+    productTitle: "",
+    collectionTitle: title,
+  });
+  send("browse", currentPage);
+});
+
+function linePayload(line) {
+  if (!line) {
+    return { productTitle: "", productType: "", imageUrl: "", quantity: 1 };
+  }
+  const merch = line.merchandise || {};
+  const product = merch.product || {};
+  let imageUrl = "";
+  if (merch.image) {
+    imageUrl = merch.image.src || merch.image.url || "";
   }
   if (imageUrl.indexOf("//") === 0) imageUrl = "https:" + imageUrl;
+  let title = product.title || "";
+  if (!title) title = merch.title || "";
   return {
-    productTitle: pick(event, ["data", "cartLine", "merchandise", "product", "title"]),
-    productType: pick(event, ["data", "cartLine", "merchandise", "product", "type"]),
+    productTitle: title,
+    productType: product.type || "",
     imageUrl: imageUrl,
+    quantity: line.quantity || 1,
   };
+}
+
+function cartLinePayload(event) {
+  const line = event.data && event.data.cartLine;
+  return linePayload(line);
+}
+
+function cartItemsPayload(event) {
+  const cart = event.data && event.data.cart;
+  const lines = (cart && cart.lines) || [];
+  const items = [];
+  for (let i = 0; i < lines.length && items.length < 8; i += 1) {
+    const item = linePayload(lines[i]);
+    if (item.productTitle || item.imageUrl) items.push(item);
+  }
+  return { items: items };
 }
 
 analytics.subscribe("product_added_to_cart", function (event) {
@@ -119,6 +163,10 @@ analytics.subscribe("product_added_to_cart", function (event) {
 
 analytics.subscribe("product_removed_from_cart", function (event) {
   send("cart_remove", cartLinePayload(event));
+});
+
+analytics.subscribe("cart_viewed", function (event) {
+  send("cart_sync", cartItemsPayload(event));
 });
 
 analytics.subscribe("checkout_started", function () {
