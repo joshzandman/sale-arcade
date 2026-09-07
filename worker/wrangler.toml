@@ -1,0 +1,10 @@
+name = "sale-arcade"
+main = "src/index.js"
+compatibility_date = "2025-04-01"
+
+[durable_objects]
+bindings = [{ name = "ARCADE", class_name = "ArcadeRoom" }]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ArcadeRoom"]
