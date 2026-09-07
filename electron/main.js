@@ -192,7 +192,10 @@ function sendEvent(payload) {
       });
     return;
   }
-  if (payload.type === "cart_sync" && Array.isArray(payload.items)) {
+  if (
+    (payload.type === "cart_sync" || payload.type === "enter") &&
+    Array.isArray(payload.items)
+  ) {
     Promise.all(payload.items.map((item) => enrichCart({ ...item })))
       .then((items) => deliverEvent({ ...payload, items }))
       .catch((err) => {

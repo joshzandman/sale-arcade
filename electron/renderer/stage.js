@@ -424,6 +424,13 @@ function replaceCartItems(npc, items) {
   applyCartPresence(npc);
 }
 
+function applyIncomingCart(npc, payload) {
+  if (!npc || !payload || !Array.isArray(payload.items) || !payload.items.length) {
+    return;
+  }
+  replaceCartItems(npc, payload.items);
+}
+
 function openDoor() {
   if (settings.landmark !== "door") return;
   if (door.phase === "closed") {
@@ -584,6 +591,7 @@ function spawnOrRefresh(id, payload) {
       forgetVisitor(id);
       return null;
     }
+    applyIncomingCart(existing, payload);
     if (
       existing.state === "leaving" &&
       payload &&
@@ -596,6 +604,10 @@ function spawnOrRefresh(id, payload) {
   if (npcs.size >= MAX_NPCS) {
     if (!waiting.includes(id)) waiting.push(id);
     if (payload && payload.firstName) pendingName.set(id, payload.firstName);
+    if (payload && Array.isArray(payload.items) && payload.items.length) {
+      const queued = pendingItems.get(id) || [];
+      pendingItems.set(id, queued.concat(payload.items));
+    }
     return { state: "queued" };
   }
   const slot = nextSlot();
@@ -618,6 +630,7 @@ function spawnOrRefresh(id, payload) {
   npcs.set(id, npc);
   applyName(npc, payload);
   applyVisit(npc, payload);
+  applyIncomingCart(npc, payload);
   if (pendingName.has(id)) {
     applyName(npc, { firstName: pendingName.get(id) });
     pendingName.delete(id);
