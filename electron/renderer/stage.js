@@ -25,8 +25,6 @@ let doorHold = 0;
 let elevator = { phase: "hidden", rise: 0, doors: 0, hold: 0 };
 let last = performance.now();
 let muted = false;
-let hoveredNpc = null;
-let hoverCardBounds = null;
 let showAllTips = false;
 let settings = {
   landmark: "door",
@@ -254,7 +252,6 @@ function forgetVisitor(id) {
   pendingCart.delete(id);
   pendingName.delete(id);
   pendingItems.delete(id);
-  if (hoveredNpc && hoveredNpc.id === id) hoveredNpc = null;
   if (had) {
     reportCount();
     admitWaiting();
@@ -1142,37 +1139,6 @@ function drawNpc(npc) {
   return width;
 }
 
-function pointIn(rect, mx, my) {
-  return (
-    rect &&
-    mx >= rect.x &&
-    mx <= rect.x + rect.w &&
-    my >= rect.y &&
-    my <= rect.y + rect.h
-  );
-}
-
-function hitNpc(mx, my) {
-  if (
-    hoverCardBounds &&
-    hoveredNpc &&
-    npcs.has(hoveredNpc.id) &&
-    npcVisible(hoveredNpc) &&
-    pointIn(hoverCardBounds, mx, my)
-  ) {
-    return hoveredNpc;
-  }
-  let found = null;
-  for (const npc of npcs.values()) {
-    const b = npc.bounds;
-    if (!b || !npcVisible(npc)) continue;
-    if (mx >= b.x - 8 && mx <= b.x + b.w + 8 && my >= b.y - 8 && my <= b.y + b.h + 8) {
-      found = npc;
-    }
-  }
-  return found;
-}
-
 function hoverCardLines(npc) {
   const items = npc.items || [];
   const small = items.length > 1;
@@ -1242,7 +1208,6 @@ function drawHoverCard(npc) {
     drawPixelText(ctx, line.text, textX, y, line.scale, line.color);
     y += 7 * line.scale + gap;
   });
-  hoverCardBounds = { x: bx - 8, y: by - 8, w: bw + 16, h: bh + 16 };
 }
 
 function drawCaption() {
@@ -1279,11 +1244,6 @@ function frame(now) {
     for (const npc of ordered) {
       if (npcVisible(npc)) drawHoverCard(npc);
     }
-    hoverCardBounds = null;
-  } else if (hoveredNpc && npcs.has(hoveredNpc.id) && npcVisible(hoveredNpc)) {
-    drawHoverCard(hoveredNpc);
-  } else {
-    hoverCardBounds = null;
   }
   drawFireworks(ctx, rockets);
   drawCaption();
@@ -1309,13 +1269,5 @@ if (window.arcade) {
     });
   }
 }
-
-window.addEventListener("mousemove", (event) => {
-  hoveredNpc = hitNpc(event.clientX, event.clientY);
-});
-window.addEventListener("mouseleave", () => {
-  hoveredNpc = null;
-  hoverCardBounds = null;
-});
 
 requestAnimationFrame(frame);
