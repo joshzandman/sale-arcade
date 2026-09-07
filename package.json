@@ -12,6 +12,7 @@
     "worker:deploy": "wrangler deploy --config worker/wrangler.toml"
   },
   "dependencies": {
+    "koffi": "^3.2.1",
     "ws": "^8.18.3"
   },
   "devDependencies": {
@@ -24,6 +25,9 @@
     "files": [
       "electron/**/*",
       "package.json"
+    ],
+    "asarUnpack": [
+      "node_modules/koffi/**"
     ],
     "extraResources": [
       {

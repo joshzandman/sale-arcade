@@ -6,11 +6,13 @@ const {
   nativeImage,
   screen,
   ipcMain,
+  globalShortcut,
 } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const { WebSocket } = require("ws");
 const { startOrderPoll } = require("./orders");
+const hidKeys = require("./hid-keys");
 
 const ROOT = app.isPackaged
   ? process.resourcesPath
@@ -28,6 +30,9 @@ let connected = false;
 let landmark = "door";
 let storeName = "Zandman's Magic Shop";
 let promptWin = null;
+let tipsHeld = false;
+let tipsPinned = false;
+let tipsPoll = null;
 
 function loadEnv() {
   const out = {};
@@ -322,6 +327,12 @@ function rebuildMenu() {
       label: "Clear stage",
       click: () => sendEvent({ type: "clear" }),
     },
+    {
+      label: tipsPinned
+        ? "Hide all visitor info"
+        : "Show all visitor info (hold ⌥`)",
+      click: () => togglePinnedTips(),
+    },
     { type: "separator" },
     {
       label: "Test",
@@ -497,6 +508,60 @@ ipcMain.on("arcade-count", (_event, count) => {
   rebuildMenu();
 });
 
+function sendTips(show) {
+  if (!overlay || overlay.isDestroyed()) return;
+  overlay.webContents.send("arcade-tips", { all: Boolean(show) });
+}
+
+function tipsVisible() {
+  return tipsHeld || tipsPinned;
+}
+
+function stopTipsPoll() {
+  if (tipsPoll) {
+    clearInterval(tipsPoll);
+    tipsPoll = null;
+  }
+}
+
+function togglePinnedTips() {
+  stopTipsPoll();
+  tipsHeld = false;
+  tipsPinned = !tipsPinned;
+  sendTips(tipsVisible());
+  rebuildMenu();
+}
+
+function onTipsHotkey() {
+  if (tipsPoll) return;
+  tipsHeld = true;
+  sendTips(true);
+  let seen = false;
+  let ticks = 0;
+  tipsPoll = setInterval(() => {
+    ticks += 1;
+    const held = hidKeys.tipsComboHeld();
+    if (held) seen = true;
+    if (seen && !held) {
+      stopTipsPoll();
+      tipsHeld = false;
+      sendTips(tipsVisible());
+    } else if (!seen && ticks >= 8) {
+      stopTipsPoll();
+      tipsHeld = false;
+      tipsPinned = !tipsPinned;
+      sendTips(tipsVisible());
+      rebuildMenu();
+    }
+  }, 50);
+}
+
+function registerTipsShortcut() {
+  globalShortcut.unregisterAll();
+  const ok = globalShortcut.register("Alt+`", onTipsHotkey);
+  if (!ok) console.error("failed to register ⌥` shortcut");
+}
+
 app.whenReady().then(() => {
   const env = { ...process.env, ...loadEnv() };
   const saved = loadState();
@@ -508,6 +573,7 @@ app.whenReady().then(() => {
   if (process.platform === "darwin") app.dock.hide();
 
   overlay = createOverlay();
+  registerTipsShortcut();
   tray = new Tray(makeTrayIcon());
   tray.setTitle("");
   tray.setToolTip("Sale Arcade");
@@ -601,6 +667,8 @@ app.on("window-all-closed", (e) => {
 });
 
 app.on("before-quit", () => {
+  stopTipsPoll();
+  globalShortcut.unregisterAll();
   clearTimeout(reconnectTimer);
   if (socket) {
     socket.removeAllListeners();

@@ -27,6 +27,7 @@ let last = performance.now();
 let muted = false;
 let hoveredNpc = null;
 let hoverCardBounds = null;
+let showAllTips = false;
 let settings = {
   landmark: "door",
   storeName: "Zandman's Magic Shop",
@@ -1269,7 +1270,12 @@ function frame(now) {
   drawLandmark();
   const ordered = [...npcs.values()].sort((a, b) => a.x - b.x);
   for (const npc of ordered) drawNpc(npc);
-  if (hoveredNpc && npcs.has(hoveredNpc.id) && npcVisible(hoveredNpc)) {
+  if (showAllTips) {
+    for (const npc of ordered) {
+      if (npcVisible(npc)) drawHoverCard(npc);
+    }
+    hoverCardBounds = null;
+  } else if (hoveredNpc && npcs.has(hoveredNpc.id) && npcVisible(hoveredNpc)) {
     drawHoverCard(hoveredNpc);
   } else {
     hoverCardBounds = null;
@@ -1292,6 +1298,11 @@ if (window.arcade) {
   window.arcade.onQueryCount(reportCount);
   if (window.arcade.onLayout) window.arcade.onLayout(applyLayout);
   if (window.arcade.onSettings) window.arcade.onSettings(applySettings);
+  if (window.arcade.onTips) {
+    window.arcade.onTips((data) => {
+      showAllTips = Boolean(data && data.all);
+    });
+  }
 }
 
 window.addEventListener("mousemove", (event) => {

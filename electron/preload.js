@@ -14,4 +14,7 @@ contextBridge.exposeInMainWorld("arcade", {
   onSettings: (cb) => {
     ipcRenderer.on("arcade-settings", (_event, data) => cb(data));
   },
+  onTips: (cb) => {
+    ipcRenderer.on("arcade-tips", (_event, data) => cb(data));
+  },
 });
