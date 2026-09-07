@@ -333,6 +333,10 @@ function rebuildMenu() {
               type: "enter",
               firstName: "Josh",
               lastName: "Zandman",
+              productTitle: "1984",
+              city: "Nashville",
+              regionCode: "TN",
+              country: "US",
             }),
         },
         {

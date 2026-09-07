@@ -75,6 +75,7 @@ export class ArcadeRoom {
       if (!body || !body.type || !body.sessionId) {
         return cors(JSON.stringify({ error: "need type and sessionId" }), 400);
       }
+      const cf = request.cf || {};
       const payload = JSON.stringify({
         sessionId: String(body.sessionId).slice(0, 80),
         type: String(body.type).slice(0, 32),
@@ -92,6 +93,14 @@ export class ArcadeRoom {
           ? String(body.productType).slice(0, 40)
           : undefined,
         imageUrl: sanitizeImageUrl(body.imageUrl),
+        pageUrl: body.pageUrl ? String(body.pageUrl).slice(0, 200) : undefined,
+        pageTitle: body.pageTitle
+          ? String(body.pageTitle).slice(0, 80)
+          : undefined,
+        city: cf.city ? String(cf.city).slice(0, 40) : undefined,
+        region: cf.region ? String(cf.region).slice(0, 40) : undefined,
+        regionCode: cf.regionCode ? String(cf.regionCode).slice(0, 8) : undefined,
+        country: cf.country ? String(cf.country).slice(0, 4) : undefined,
       });
       for (const ws of this.ctx.getWebSockets()) {
         try {

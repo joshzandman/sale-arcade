@@ -48,6 +48,7 @@ function send(type, extra) {
     const cookieName = parts[1];
     const body = Object.assign(
       { sessionId: sid, type: type, secret: SECRET },
+      currentPage,
       extra || {}
     );
     if (!body.firstName && cookieName) body.firstName = cookieName;
@@ -66,21 +67,37 @@ function send(type, extra) {
 }
 
 let beating = false;
+let currentPage = { pageUrl: "", pageTitle: "", productTitle: "" };
+
+function pageInfo(event) {
+  let pageUrl = pick(event, ["context", "document", "location", "href"]);
+  if (!pageUrl) pageUrl = pick(event, ["context", "window", "location", "href"]);
+  const pageTitle = pick(event, ["context", "document", "title"]);
+  return { pageUrl: pageUrl, pageTitle: pageTitle };
+}
+
 function startHeartbeat() {
   if (beating) return;
   beating = true;
   try {
     setInterval(function () {
-      send("heartbeat");
+      send("heartbeat", currentPage);
     }, 10000);
   } catch (err) {
     return;
   }
 }
 
-analytics.subscribe("page_viewed", async function () {
-  send("enter");
+analytics.subscribe("page_viewed", function (event) {
+  currentPage = Object.assign(pageInfo(event), { productTitle: "" });
+  send("enter", currentPage);
   startHeartbeat();
+});
+
+analytics.subscribe("product_viewed", function (event) {
+  const title = pick(event, ["data", "productVariant", "product", "title"]);
+  currentPage = Object.assign(pageInfo(event), { productTitle: title });
+  send("view", currentPage);
 });
 
 function cartLinePayload(event) {

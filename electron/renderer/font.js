@@ -1,6 +1,7 @@
 const GLYPH = {
   " ": "00000,00000,00000,00000,00000,00000,00000",
   "'": "01100,01100,00100,01000,00000,00000,00000",
+  ",": "00000,00000,00000,00000,01100,01100,01000",
   "-": "00000,00000,00000,11111,00000,00000,00000",
   ".": "00000,00000,00000,00000,00000,01100,01100",
   $: "01110,10101,10100,01110,00101,10101,01110",
@@ -42,6 +43,17 @@ const GLYPH = {
   Z: "11111,00001,00010,00100,01000,10000,11111",
 };
 
+function glyphAdvance(ch, scale) {
+  return ch === " " || ch === "," ? 4 * scale : 6 * scale;
+}
+
+function measurePixelText(text, scale) {
+  const str = String(text).toUpperCase();
+  let width = 0;
+  for (const ch of str) width += glyphAdvance(ch, scale);
+  return width;
+}
+
 function drawPixelText(ctx, text, x, y, scale, color) {
   const str = String(text).toUpperCase();
   ctx.save();
@@ -58,7 +70,7 @@ function drawPixelText(ctx, text, x, y, scale, color) {
         }
       }
     }
-    cursor += ch === " " ? 4 * scale : 6 * scale;
+    cursor += glyphAdvance(ch, scale);
   }
   ctx.restore();
   return cursor - x;

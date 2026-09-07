@@ -25,6 +25,8 @@ let doorHold = 0;
 let elevator = { phase: "hidden", rise: 0, doors: 0, hold: 0 };
 let last = performance.now();
 let muted = false;
+let hoveredNpc = null;
+let hoverCardBounds = null;
 let settings = {
   landmark: "door",
   storeName: "Zandman's Magic Shop",
@@ -154,6 +156,63 @@ function cleanNamePart(value) {
     .trim();
 }
 
+function viewingLabel(payload, npc) {
+  if (payload.productTitle) return String(payload.productTitle).slice(0, 28);
+  if (payload.pageTitle) {
+    return String(payload.pageTitle)
+      .split(/\s+[|\-–—]\s+/)[0]
+      .slice(0, 28);
+  }
+  if (payload.pageUrl) {
+    try {
+      const path = new URL(payload.pageUrl).pathname.split("/").filter(Boolean);
+      if (!path.length) return "Home";
+      if (path[0] === "products" && path[1]) {
+        return decodeURIComponent(path[1]).replace(/-/g, " ").slice(0, 28);
+      }
+      if (path[0] === "collections" && path[1]) {
+        return decodeURIComponent(path[1]).replace(/-/g, " ").slice(0, 28);
+      }
+      return decodeURIComponent(path[path.length - 1])
+        .replace(/-/g, " ")
+        .slice(0, 28);
+    } catch (err) {
+      return "";
+    }
+  }
+  return (npc && npc.viewing) || "";
+}
+
+function locationLabel(npc) {
+  const country = String(npc.country || "").toUpperCase();
+  const city = npc.city || "";
+  const region = npc.regionCode || npc.region || "";
+  if (country === "US") {
+    const bits = [];
+    if (city) bits.push(city);
+    if (region) bits.push(region);
+    if (bits.length) return bits.join(", ");
+  }
+  if (country) {
+    try {
+      return new Intl.DisplayNames(["en"], { type: "region" }).of(country) || country;
+    } catch (err) {
+      return country;
+    }
+  }
+  return "";
+}
+
+function applyVisit(npc, payload) {
+  if (!npc || !payload) return;
+  const view = viewingLabel(payload, npc);
+  if (view) npc.viewing = view;
+  if (payload.city) npc.city = payload.city;
+  if (payload.region) npc.region = payload.region;
+  if (payload.regionCode) npc.regionCode = payload.regionCode;
+  if (payload.country) npc.country = payload.country;
+}
+
 function applyName(npc, payload) {
   if (!npc || !payload) return;
   let first = cleanNamePart(payload.firstName);
@@ -265,11 +324,21 @@ function handleEvent(payload) {
     spawnOrRefresh(id, payload);
     return;
   }
+  if (payload.type === "view") {
+    const npc = npcs.get(id) || spawnOrRefresh(id, payload);
+    if (npc && npcs.has(id)) {
+      npc.lastEvent = Date.now();
+      applyName(npc, payload);
+      applyVisit(npc, payload);
+    }
+    return;
+  }
   if (payload.type === "heartbeat") {
     const npc = npcs.get(id);
     if (npc && npc.state !== "leaving") {
       npc.lastEvent = Date.now();
       applyName(npc, payload);
+      applyVisit(npc, payload);
     }
     return;
   }
@@ -285,6 +354,7 @@ function handleEvent(payload) {
       return;
     }
     applyName(npc, payload);
+    applyVisit(npc, payload);
     npc.hadCart = true;
     npc.productTitle = payload.productTitle || npc.productTitle;
     npc.lastEvent = Date.now();
@@ -327,6 +397,7 @@ function spawnOrRefresh(id, payload) {
   if (existing) {
     existing.lastEvent = Date.now();
     applyName(existing, payload);
+    applyVisit(existing, payload);
     if (
       existing.state === "leaving" &&
       payload &&
@@ -360,6 +431,7 @@ function spawnOrRefresh(id, payload) {
   };
   npcs.set(id, npc);
   applyName(npc, payload);
+  applyVisit(npc, payload);
   if (pendingName.has(id)) {
     applyName(npc, { firstName: pendingName.get(id) });
     pendingName.delete(id);
@@ -389,6 +461,7 @@ function purchase(id, payload) {
   }
   if (npc && npcs.has(npc.id)) {
     applyName(npc, payload);
+    applyVisit(npc, payload);
     npc.state = "celebrating";
     npc.celebT = 0;
     npc.total = payload.total;
@@ -876,7 +949,78 @@ function drawNpc(npc) {
     drawCartItems(npc, x, y, width, h, flip);
   }
   drawBubble(npc, x, y, width);
+  npc.bounds = { x, y, w: width, h };
   return width;
+}
+
+function pointIn(rect, mx, my) {
+  return (
+    rect &&
+    mx >= rect.x &&
+    mx <= rect.x + rect.w &&
+    my >= rect.y &&
+    my <= rect.y + rect.h
+  );
+}
+
+function hitNpc(mx, my) {
+  if (
+    hoverCardBounds &&
+    hoveredNpc &&
+    npcs.has(hoveredNpc.id) &&
+    npcVisible(hoveredNpc) &&
+    pointIn(hoverCardBounds, mx, my)
+  ) {
+    return hoveredNpc;
+  }
+  let found = null;
+  for (const npc of npcs.values()) {
+    const b = npc.bounds;
+    if (!b || !npcVisible(npc)) continue;
+    if (mx >= b.x - 8 && mx <= b.x + b.w + 8 && my >= b.y - 8 && my <= b.y + b.h + 8) {
+      found = npc;
+    }
+  }
+  return found;
+}
+
+function drawHoverCard(npc) {
+  const view = npc.viewing || "Browsing";
+  const loc = locationLabel(npc);
+  const scale = 2;
+  const line1 = String(view).slice(0, 22);
+  const line2 = loc ? String(loc).slice(0, 22) : "";
+  const w1 = measurePixelText(line1, scale);
+  const w2 = line2 ? measurePixelText(line2, scale) : 0;
+  const tw = Math.max(w1, w2);
+  const padX = 8;
+  const padY = 6;
+  const bw = tw + padX * 2;
+  const bh = (line2 ? 2 : 1) * (7 * scale) + padY * 2 + (line2 ? 4 : 0);
+  const b = npc.bounds || { x: npc.x, y: groundY() - NPC_H, w: 80 };
+  const nameLift = npc.firstName ? 52 : 0;
+  let bx = Math.round(b.x + b.w / 2 - bw / 2);
+  let by = Math.round((b.y || groundY() - NPC_H) - bh - 10 - nameLift);
+  bx = Math.max(stage.left + 4, Math.min(bx, stage.left + stage.width - bw - 4));
+  by = Math.max(stage.top + 4, by);
+  ctx.fillStyle = "rgba(12,8,20,0.88)";
+  ctx.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
+  ctx.fillStyle = "#1a1028";
+  ctx.fillRect(bx, by, bw, bh);
+  ctx.fillStyle = "#6b5a3a";
+  ctx.fillRect(bx, by, bw, 2);
+  drawPixelText(ctx, line1, bx + Math.round((bw - w1) / 2), by + padY, scale, "#fff1a8");
+  if (line2) {
+    drawPixelText(
+      ctx,
+      line2,
+      bx + Math.round((bw - w2) / 2),
+      by + padY + 7 * scale + 4,
+      scale,
+      "#c8d4e8"
+    );
+  }
+  hoverCardBounds = { x: bx - 8, y: by - 8, w: bw + 16, h: bh + 16 };
 }
 
 function drawCaption() {
@@ -909,6 +1053,11 @@ function frame(now) {
   drawLandmark();
   const ordered = [...npcs.values()].sort((a, b) => a.x - b.x);
   for (const npc of ordered) drawNpc(npc);
+  if (hoveredNpc && npcs.has(hoveredNpc.id) && npcVisible(hoveredNpc)) {
+    drawHoverCard(hoveredNpc);
+  } else {
+    hoverCardBounds = null;
+  }
   drawFireworks(ctx, rockets);
   drawCaption();
   requestAnimationFrame(frame);
@@ -928,5 +1077,13 @@ if (window.arcade) {
   if (window.arcade.onLayout) window.arcade.onLayout(applyLayout);
   if (window.arcade.onSettings) window.arcade.onSettings(applySettings);
 }
+
+window.addEventListener("mousemove", (event) => {
+  hoveredNpc = hitNpc(event.clientX, event.clientY);
+});
+window.addEventListener("mouseleave", () => {
+  hoveredNpc = null;
+  hoverCardBounds = null;
+});
 
 requestAnimationFrame(frame);
