@@ -228,6 +228,38 @@ function hoverViewLine(npc) {
   return `${kind} ${title}`;
 }
 
+function normalizePlace(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function isHiddenLocation(loc) {
+  if (!loc) return false;
+  if (normalizePlace(loc.city) !== "council bluffs") return false;
+  const region = normalizePlace(loc.region);
+  const code = String(loc.regionCode || "").toUpperCase();
+  const country = String(loc.country || "").toUpperCase();
+  if (code === "IA" || region === "iowa" || region === "ia") return true;
+  return !code && !region && (country === "US" || !country);
+}
+
+function forgetVisitor(id) {
+  if (!id) return;
+  const had = npcs.delete(id);
+  const waitIdx = waiting.indexOf(id);
+  if (waitIdx >= 0) waiting.splice(waitIdx, 1);
+  pendingCart.delete(id);
+  pendingName.delete(id);
+  pendingItems.delete(id);
+  if (hoveredNpc && hoveredNpc.id === id) hoveredNpc = null;
+  if (had) {
+    reportCount();
+    admitWaiting();
+  }
+}
+
 function locationLabel(npc) {
   const country = String(npc.country || "").toUpperCase();
   const city = npc.city || "";
@@ -441,6 +473,10 @@ function handleEvent(payload) {
   }
 
   const id = payload.sessionId || "anon";
+  if (isHiddenLocation(payload)) {
+    forgetVisitor(id);
+    return;
+  }
   if (payload.type === "enter") {
     spawnOrRefresh(id, payload);
     return;
@@ -451,6 +487,7 @@ function handleEvent(payload) {
       npc.lastEvent = Date.now();
       applyName(npc, payload);
       applyVisit(npc, payload);
+      if (isHiddenLocation(npc)) forgetVisitor(id);
     }
     return;
   }
@@ -460,13 +497,15 @@ function handleEvent(payload) {
       npc.lastEvent = Date.now();
       applyName(npc, payload);
       applyVisit(npc, payload);
+      if (isHiddenLocation(npc)) forgetVisitor(id);
     }
     return;
   }
   if (payload.type === "cart") {
     let npc = npcs.get(id);
     if (!npc) npc = spawnOrRefresh(id, payload);
-    if (!npc || !npcs.has(id)) {
+    if (!npc) return;
+    if (!npcs.has(id)) {
       pendingCart.add(id);
       if (payload.firstName) pendingName.set(id, payload.firstName);
       const queued = pendingItems.get(id) || [];
@@ -503,6 +542,10 @@ function handleEvent(payload) {
       npc.lastEvent = Date.now();
       applyName(npc, payload);
       applyVisit(npc, payload);
+      if (isHiddenLocation(npc)) {
+        forgetVisitor(id);
+        return;
+      }
       replaceCartItems(npc, payload.items || []);
     }
     return;
@@ -525,11 +568,19 @@ function handleEvent(payload) {
 }
 
 function spawnOrRefresh(id, payload) {
+  if (isHiddenLocation(payload)) {
+    forgetVisitor(id);
+    return null;
+  }
   const existing = npcs.get(id);
   if (existing) {
     existing.lastEvent = Date.now();
     applyName(existing, payload);
     applyVisit(existing, payload);
+    if (isHiddenLocation(existing)) {
+      forgetVisitor(id);
+      return null;
+    }
     if (
       existing.state === "leaving" &&
       payload &&

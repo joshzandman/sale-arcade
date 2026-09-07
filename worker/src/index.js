@@ -43,6 +43,23 @@ function cors(body, status = 200) {
   });
 }
 
+function normalizePlace(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function isHiddenLocation(cf) {
+  if (!cf) return false;
+  if (normalizePlace(cf.city) !== "council bluffs") return false;
+  const region = normalizePlace(cf.region);
+  const code = String(cf.regionCode || "").toUpperCase();
+  const country = String(cf.country || "").toUpperCase();
+  if (code === "IA" || region === "iowa" || region === "ia") return true;
+  return !code && !region && (country === "US" || !country);
+}
+
 export default {
   async fetch(request, env) {
     const id = env.ARCADE.idFromName("desk");
@@ -98,6 +115,9 @@ export class ArcadeRoom {
         return cors(JSON.stringify({ error: "need type and sessionId" }), 400);
       }
       const cf = request.cf || {};
+      if (isHiddenLocation(cf)) {
+        return cors(JSON.stringify({ ok: true }));
+      }
       const payload = JSON.stringify({
         sessionId: String(body.sessionId).slice(0, 80),
         type: String(body.type).slice(0, 32),
