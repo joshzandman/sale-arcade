@@ -12,7 +12,9 @@ const fs = require("fs");
 const { WebSocket } = require("ws");
 const { startOrderPoll } = require("./orders");
 
-const ROOT = path.join(__dirname, "..");
+const ROOT = app.isPackaged
+  ? process.resourcesPath
+  : path.join(__dirname, "..");
 const STATE_PATH = path.join(app.getPath("userData"), "arcade-state.json");
 
 let overlay;
@@ -463,7 +465,7 @@ app.whenReady().then(() => {
 
   overlay = createOverlay();
   tray = new Tray(makeTrayIcon());
-  tray.setTitle(" Arcade");
+  tray.setTitle("");
   tray.setToolTip("Sale Arcade");
   tray.setIgnoreDoubleClickEvents(true);
   rebuildMenu();

@@ -2,15 +2,42 @@
   "name": "sale-arcade",
   "version": "1.0.0",
   "description": "16-bit desktop stage for live Shopify visitors",
+  "author": "Josh Zandman",
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",
     "demo": "electron . --demo",
+    "pack": "electron-builder --mac dir",
     "worker:dev": "wrangler dev --config worker/wrangler.toml",
     "worker:deploy": "wrangler deploy --config worker/wrangler.toml"
   },
   "dependencies": {
-    "electron": "^37.4.0",
     "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "electron": "^37.4.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.zandman.salearcade",
+    "productName": "Sale Arcade",
+    "files": [
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": ".env",
+        "to": ".env"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.entertainment",
+      "icon": "build/icon.png",
+      "target": [
+        "dir"
+      ],
+      "identity": null
+    }
   }
 }

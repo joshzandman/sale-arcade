@@ -848,8 +848,14 @@ function drawCartItems(npc, x, y, width, height, flip) {
 
 function npcVisible(npc) {
   if (settings.landmark !== "elevator") return true;
-  if (npc.state === "entering" && elevator.rise < 0.82) return false;
-  if (npc.state === "leaving" && npc.x >= elevatorX() + 8 && elevator.doors < 0.35) {
+  if (npc.state === "entering" && !npc.disembarked && elevator.rise < 0.82) {
+    return false;
+  }
+  if (
+    npc.state === "leaving" &&
+    npc.x >= elevatorX() + 8 &&
+    (elevator.doors < 0.35 || elevator.rise < 0.85)
+  ) {
     return false;
   }
   return true;
