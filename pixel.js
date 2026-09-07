@@ -21,18 +21,42 @@ async function sessionId() {
   return id;
 }
 
+async function memberName() {
+  try {
+    const cookie = await browser.cookie.get("sale_arcade_name");
+    if (cookie) return decodeURIComponent(cookie).trim();
+  } catch (err) {
+    /* no cookie access */
+  }
+  return "";
+}
+
 function send(type, extra) {
-  sessionId().then((sid) => {
+  Promise.all([sessionId(), memberName()]).then(([sid, cookieName]) => {
+    const body = Object.assign({ sessionId: sid, type }, extra || {});
+    const firstName = body.firstName || cookieName;
+    if (firstName) body.firstName = String(firstName).slice(0, 24);
     fetch(ENDPOINT, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: "Bearer " + SECRET,
       },
-      body: JSON.stringify(Object.assign({ sessionId: sid, type }, extra || {})),
+      body: JSON.stringify(body),
       keepalive: true,
     }).catch(() => {});
   });
+}
+
+let beating = false;
+function startHeartbeat() {
+  if (beating) return;
+  beating = true;
+  try {
+    setInterval(() => send("heartbeat"), 10000);
+  } catch (err) {
+    /* sandbox may block timers; page_viewed still pings */
+  }
 }
 
 analytics.subscribe("page_viewed", async () => {
@@ -43,6 +67,7 @@ analytics.subscribe("page_viewed", async () => {
   } else {
     send("heartbeat");
   }
+  startHeartbeat();
 });
 
 analytics.subscribe("product_added_to_cart", (event) => {
@@ -75,5 +100,13 @@ analytics.subscribe("checkout_completed", (event) => {
     (first && first.title) ||
     (first && first.variant && first.variant.product && first.variant.product.title) ||
     "";
-  send("purchase", { total, productTitle: title });
+  const firstName =
+    (checkout &&
+      checkout.billingAddress &&
+      checkout.billingAddress.firstName) ||
+    (checkout &&
+      checkout.shippingAddress &&
+      checkout.shippingAddress.firstName) ||
+    "";
+  send("purchase", { total, productTitle: title, firstName });
 });

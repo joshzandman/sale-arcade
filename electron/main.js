@@ -123,20 +123,11 @@ function requestCount() {
 }
 
 function makeTrayIcon() {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
-    <rect x="3" y="1" width="10" height="14" rx="1" fill="black"/>
-    <rect x="5" y="3" width="6" height="4" fill="white"/>
-    <rect x="10" y="10" width="2" height="2" fill="white"/>
-  </svg>`;
-  const img = nativeImage.createFromBuffer(Buffer.from(svg));
-  if (!img.isEmpty()) img.setTemplateImage(true);
-  if (img.isEmpty()) {
-    const fallback = nativeImage.createFromDataURL(
-      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGUlEQVQ4T2NkYGD4z0ABYBw1gGE0DBhOBQBVAgQJ1xN4aQAAAABJRU5ErkJggg=="
-    );
-    fallback.setTemplateImage(true);
-    return fallback;
-  }
+  const retina = path.join(__dirname, "tray-icon@2x.png");
+  const img = nativeImage.createFromPath(
+    fs.existsSync(retina) ? retina : path.join(__dirname, "tray-icon.png")
+  );
+  img.setTemplateImage(true);
   return img;
 }
 
@@ -154,6 +145,15 @@ function rebuildMenu() {
         sendEvent({
           sessionId: `test-${Date.now()}`,
           type: "enter",
+        }),
+    },
+    {
+      label: "Test: member walks in",
+      click: () =>
+        sendEvent({
+          sessionId: "test-member",
+          type: "enter",
+          firstName: "Josh",
         }),
     },
     {
@@ -269,13 +269,18 @@ ipcMain.on("arcade-count", (_event, count) => {
 
 app.whenReady().then(() => {
   const env = { ...process.env, ...loadEnv() };
+  app.setName("Sale Arcade");
   if (process.platform === "darwin") app.dock.hide();
 
   overlay = createOverlay();
   tray = new Tray(makeTrayIcon());
+  tray.setTitle(" Arcade");
+  tray.setToolTip("Sale Arcade");
+  tray.setIgnoreDoubleClickEvents(true);
   rebuildMenu();
 
   overlay.webContents.on("did-finish-load", () => {
+    sendLayout();
     sendEvent({ type: "mute", muted });
     if (process.argv.includes("--demo")) {
       sendEvent({ sessionId: "demo-1", type: "enter" });
@@ -330,9 +335,29 @@ app.whenReady().then(() => {
   screen.on("display-metrics-changed", relayout);
 });
 
+function layoutPayload() {
+  const overlayBounds = overlay.getBounds();
+  const work = screen.getPrimaryDisplay().workArea;
+  return {
+    overlay: overlayBounds,
+    work: {
+      x: work.x - overlayBounds.x,
+      y: work.y - overlayBounds.y,
+      width: work.width,
+      height: work.height,
+    },
+  };
+}
+
+function sendLayout() {
+  if (!overlay || overlay.isDestroyed()) return;
+  overlay.webContents.send("arcade-layout", layoutPayload());
+}
+
 function relayout() {
   if (!overlay || overlay.isDestroyed()) return;
   overlay.setBounds(unionBounds());
+  sendLayout();
 }
 
 app.on("window-all-closed", (e) => {

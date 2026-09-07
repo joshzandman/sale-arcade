@@ -71,6 +71,9 @@ export class ArcadeRoom {
           ? String(body.productTitle).slice(0, 80)
           : undefined,
         total: body.total ? String(body.total).slice(0, 24) : undefined,
+        firstName: body.firstName
+          ? String(body.firstName).slice(0, 24)
+          : undefined,
       });
       for (const ws of this.ctx.getWebSockets()) {
         try {

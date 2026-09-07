@@ -84,6 +84,7 @@ async function loadAllSprites() {
     celebrate: "sprites/npc-celebrate.jpg",
     doorClosed: "sprites/door-closed.jpg",
     doorOpen: "sprites/door-open.jpg",
+    look: "sprites/npc-look.jpg",
   };
   const out = {};
   await Promise.all(

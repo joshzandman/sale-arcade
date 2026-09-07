@@ -1,17 +1,18 @@
 const MAX_NPCS = 6;
-const IDLE_MS = 120000;
+const IDLE_MS = 25000;
 const NPC_H = 140;
 const DOOR_H = 196;
 const WALK_SPEED = 130;
-
 const canvas = document.getElementById("stage");
 const ctx = canvas.getContext("2d");
 let cssW = window.innerWidth;
 let cssH = window.innerHeight;
+let stage = { left: 0, top: 0, width: cssW, height: cssH };
 
 const npcs = new Map();
 const waiting = [];
 const pendingCart = new Set();
+const pendingName = new Map();
 let sprites = null;
 let rockets = [];
 let caption = null;
@@ -34,17 +35,44 @@ function resize() {
 window.addEventListener("resize", resize);
 resize();
 
+function applyLayout(data) {
+  if (!data || !data.work) return;
+  stage = {
+    left: data.work.x,
+    top: data.work.y,
+    width: data.work.width,
+    height: data.work.height,
+  };
+}
+
 function groundY() {
-  return cssH - 22;
+  return stage.top + stage.height - 22;
+}
+
+function doorWidth() {
+  if (!sprites || !sprites.doorClosed) return 140;
+  const closed = (sprites.doorClosed.sw / sprites.doorClosed.sh) * DOOR_H;
+  const open = sprites.doorOpen
+    ? (sprites.doorOpen.sw / sprites.doorOpen.sh) * DOOR_H
+    : closed;
+  return Math.max(closed, open);
 }
 
 function doorX() {
-  return cssW - 150;
+  return stage.left + stage.width - doorWidth() - 18;
+}
+
+function stageLeft() {
+  return stage.left + 28;
+}
+
+function stageRight() {
+  return Math.max(stageLeft() + 40, doorX() - 16);
 }
 
 function slotX(index) {
-  const left = 36;
-  const right = doorX() - 130;
+  const left = stageLeft();
+  const right = stageRight();
   const span = Math.max(120, right - left);
   return left + ((index + 0.5) * span) / MAX_NPCS;
 }
@@ -57,6 +85,15 @@ function nextSlot() {
 
 function reportCount() {
   if (window.arcade) window.arcade.sendCount(npcs.size);
+}
+
+function applyName(npc, payload) {
+  if (!npc || !payload || !payload.firstName) return;
+  const clean = String(payload.firstName)
+    .replace(/[^a-zA-Z0-9 '\-]/g, "")
+    .trim()
+    .slice(0, 14);
+  if (clean) npc.firstName = clean;
 }
 
 function openDoor() {
@@ -79,22 +116,26 @@ function handleEvent(payload) {
 
   const id = payload.sessionId || "anon";
   if (payload.type === "enter") {
-    spawnOrRefresh(id);
+    spawnOrRefresh(id, payload);
     return;
   }
   if (payload.type === "heartbeat") {
     const npc = npcs.get(id);
-    if (npc) npc.lastEvent = Date.now();
-    else spawnOrRefresh(id);
+    if (npc) {
+      npc.lastEvent = Date.now();
+      applyName(npc, payload);
+    } else spawnOrRefresh(id, payload);
     return;
   }
   if (payload.type === "cart") {
     let npc = npcs.get(id);
-    if (!npc) npc = spawnOrRefresh(id);
+    if (!npc) npc = spawnOrRefresh(id, payload);
     if (!npc || !npcs.has(id)) {
       pendingCart.add(id);
+      if (payload.firstName) pendingName.set(id, payload.firstName);
       return;
     }
+    applyName(npc, payload);
     npc.hadCart = true;
     npc.productTitle = payload.productTitle || npc.productTitle;
     npc.lastEvent = Date.now();
@@ -113,12 +154,17 @@ function handleEvent(payload) {
   if (payload.type === "purchase") {
     purchase(id, payload);
   }
+  if (payload.type === "leave") {
+    const npc = npcs.get(id);
+    if (npc) npc.state = "leaving";
+  }
 }
 
-function spawnOrRefresh(id) {
+function spawnOrRefresh(id, payload) {
   const existing = npcs.get(id);
   if (existing) {
     existing.lastEvent = Date.now();
+    applyName(existing, payload);
     if (existing.state === "leaving") {
       existing.state = existing.hadCart ? "cart" : "idle";
     }
@@ -126,6 +172,7 @@ function spawnOrRefresh(id) {
   }
   if (npcs.size >= MAX_NPCS) {
     if (!waiting.includes(id)) waiting.push(id);
+    if (payload && payload.firstName) pendingName.set(id, payload.firstName);
     return { state: "queued" };
   }
   const slot = nextSlot();
@@ -139,8 +186,16 @@ function spawnOrRefresh(id) {
     lastEvent: Date.now(),
     bob: 0,
     hadCart: false,
+    look: "side",
+    browseT: 0,
+    browseTarget: null,
   };
   npcs.set(id, npc);
+  applyName(npc, payload);
+  if (pendingName.has(id)) {
+    applyName(npc, { firstName: pendingName.get(id) });
+    pendingName.delete(id);
+  }
   if (pendingCart.has(id)) {
     npc.hadCart = true;
     pendingCart.delete(id);
@@ -161,6 +216,7 @@ function purchase(id, payload) {
     }
   }
   if (npc && npcs.has(npc.id)) {
+    applyName(npc, payload);
     npc.state = "celebrating";
     npc.celebT = 0;
     npc.total = payload.total;
@@ -186,8 +242,7 @@ function stepNpc(npc, dt) {
   const moving =
     npc.state === "entering" ||
     npc.state === "leaving" ||
-    npc.state === "cart" ||
-    (npc.state === "idle" && Math.abs(npc.x - npc.targetX) > 2);
+    npc.state === "cart";
 
   if (npc.state === "entering") {
     npc.facing = -1;
@@ -197,19 +252,41 @@ function stepNpc(npc, dt) {
       npc.state = npc.hadCart ? "cart" : "idle";
     }
   } else if (npc.state === "idle") {
-    if (Math.random() < 0.004) {
-      npc.targetX = slotX(npc.slot) + (Math.random() - 0.5) * 48;
-      npc.facing = npc.targetX >= npc.x ? 1 : -1;
-    }
-    const dir = Math.sign(npc.targetX - npc.x);
-    if (dir) {
-      npc.x += dir * 28 * dt;
-      npc.facing = dir;
+    npc.browseT = (npc.browseT || 0) + dt;
+    const t = npc.browseT % 8;
+    const left = stageLeft();
+    const right = stageRight();
+    npc.x = Math.min(right, Math.max(left, npc.x));
+    if (t < 1.8) {
+      npc.look = "up";
+      npc.bob = 0;
+    } else if (t < 2.7) {
+      npc.look = "side";
+      npc.facing = -1;
+      npc.bob = 0;
+    } else if (t < 3.6) {
+      npc.look = "side";
+      npc.facing = 1;
+      npc.bob = 0;
+    } else {
+      npc.look = "side";
+      if (npc.browseTarget == null) {
+        npc.browseTarget = left + Math.random() * Math.max(8, right - left);
+      }
+      const gap = npc.browseTarget - npc.x;
+      if (Math.abs(gap) > 3) {
+        npc.facing = Math.sign(gap);
+        npc.x += npc.facing * 38 * dt;
+        npc.bob = Math.abs(Math.sin(performance.now() / 90)) * 4;
+      } else {
+        npc.browseTarget = null;
+        npc.bob = 0;
+      }
     }
   } else if (npc.state === "cart") {
     npc.hadCart = true;
-    const left = 40;
-    const right = doorX() - 140;
+    const left = stageLeft();
+    const right = stageRight();
     npc.x += npc.facing * 70 * dt;
     if (npc.x < left) {
       npc.x = left;
@@ -222,9 +299,8 @@ function stepNpc(npc, dt) {
   } else if (npc.state === "celebrating") {
     npc.celebT += dt;
     if (npc.celebT > 2.6) {
-      npc.state = "leaving";
-      npc.targetX = doorX() + 8;
-      npc.facing = 1;
+      npc.state = "idle";
+      npc.look = "up";
     }
   } else if (npc.state === "leaving") {
     npc.facing = 1;
@@ -238,16 +314,16 @@ function stepNpc(npc, dt) {
     }
   }
 
-  if (
-    Date.now() - npc.lastEvent > IDLE_MS &&
-    npc.state !== "leaving" &&
-    npc.state !== "celebrating"
-  ) {
+  if (Date.now() - npc.lastEvent > IDLE_MS && npc.state !== "leaving") {
     npc.state = "leaving";
     npc.targetX = doorX() + 8;
   }
 
-  npc.bob = moving ? Math.abs(Math.sin(performance.now() / 90)) * 4 : Math.sin(performance.now() / 400) * 1.2;
+  if (npc.state !== "idle") {
+    npc.look = "side";
+    npc.browseTarget = null;
+    npc.bob = moving ? Math.abs(Math.sin(performance.now() / 90)) * 4 : 0;
+  }
 }
 
 function stepDoor(dt) {
@@ -272,14 +348,16 @@ function stepDoor(dt) {
 }
 
 function drawSidewalk() {
-  const y = cssH - 26;
+  const y = groundY() - 4;
   const brickW = 32;
   const brickH = 13;
+  const x0 = stage.left;
+  const w = stage.width;
   ctx.fillStyle = "rgba(8,6,12,0.45)";
-  ctx.fillRect(0, y - 8, cssW, 34);
+  ctx.fillRect(x0, y - 8, w, 34);
   for (let row = 0; row < 2; row += 1) {
     const off = (row % 2) * (brickW / 2);
-    for (let x = -brickW; x < cssW + brickW; x += brickW) {
+    for (let x = x0 - brickW; x < x0 + w + brickW; x += brickW) {
       ctx.fillStyle = row === 0 ? "#7a757c" : "#4e4a52";
       ctx.fillRect(Math.round(x + off), y + row * brickH, brickW - 2, brickH - 2);
       ctx.fillStyle = "#9a959c";
@@ -288,34 +366,107 @@ function drawSidewalk() {
   }
 }
 
+function drawDoorSign(doorLeft, doorTop, faceWidth, doorH) {
+  const line1 = "ZANDMAN'S";
+  const line2 = "MAGIC SHOP";
+  let scale = faceWidth >= 150 ? 2 : 1;
+  let w1 = line1.length * 6 * scale;
+  let w2 = line2.length * 6 * scale;
+  const pad = 4 * scale;
+  let signW = Math.max(w1, w2) + pad * 2;
+  if (signW > faceWidth - 12) {
+    scale = 1;
+    w1 = line1.length * 6 * scale;
+    w2 = line2.length * 6 * scale;
+    signW = Math.max(w1, w2) + 8;
+  }
+  const signH = 7 * scale * 2 + 6 * scale;
+  const sx = Math.round(doorLeft + faceWidth / 2 - signW / 2);
+  const sy = Math.round(doorTop + doorH * 0.62);
+  ctx.fillStyle = "#2a1408";
+  ctx.fillRect(sx - 2, sy - 2, signW + 4, signH + 4);
+  ctx.fillStyle = "#c4a35a";
+  ctx.fillRect(sx, sy, signW, signH);
+  ctx.fillStyle = "#8a6a2a";
+  ctx.fillRect(sx, sy, signW, 2);
+  ctx.fillRect(sx, sy + signH - 2, signW, 2);
+  drawPixelText(
+    ctx,
+    line1,
+    sx + Math.round((signW - w1) / 2),
+    sy + 3 * scale,
+    scale,
+    "#3a1c08"
+  );
+  drawPixelText(
+    ctx,
+    line2,
+    sx + Math.round((signW - w2) / 2),
+    sy + 3 * scale + 7 * scale + 2,
+    scale,
+    "#3a1c08"
+  );
+}
+
 function drawDoor() {
   if (!sprites) return;
+  const reserved = doorWidth();
   const x = doorX();
   const y = groundY() - DOOR_H;
-  if (door.t < 0.45) {
-    drawSprite(ctx, sprites.doorClosed, x, y, DOOR_H, false);
-  } else {
-    drawSprite(ctx, sprites.doorOpen, x - 18, y, DOOR_H, false);
-  }
+  const closed = door.t < 0.45;
+  const spr = closed ? sprites.doorClosed : sprites.doorOpen;
+  const w = (spr.sw / spr.sh) * DOOR_H;
+  const dx = x + (reserved - w);
+  drawSprite(ctx, spr, dx, y, DOOR_H, false);
+  const faceW = closed ? w : w * 0.4;
+  drawDoorSign(dx, y, faceW, DOOR_H);
 }
 
 function spriteFor(npc) {
   if (npc.state === "celebrating") return sprites.celebrate;
-  if (npc.state === "cart" || npc.hadCart) return sprites.cart;
+  if (npc.state === "cart" || (npc.hadCart && npc.state !== "idle")) return sprites.cart;
+  if (npc.state === "idle" && npc.look === "up" && sprites.look) return sprites.look;
   return sprites.idle;
+}
+
+function drawBubble(npc, x, y, width) {
+  if (!npc.firstName) return;
+  const scale = 2;
+  const text = npc.firstName;
+  const tw = text.length * 6 * scale;
+  const padX = 7;
+  const padY = 5;
+  const bw = tw + padX * 2;
+  const bh = 7 * scale + padY * 2;
+  let bx = Math.round(x + width / 2 - bw / 2);
+  let by = Math.round(y - bh - 14);
+  bx = Math.max(stage.left + 4, Math.min(bx, stage.left + stage.width - bw - 4));
+  by = Math.max(stage.top + 4, by);
+  ctx.fillStyle = "#1a1020";
+  ctx.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
+  ctx.fillStyle = "#fff8e8";
+  ctx.fillRect(bx, by, bw, bh);
+  const tailX = Math.round(Math.min(Math.max(x + width / 2, bx + 8), bx + bw - 8));
+  ctx.fillStyle = "#1a1020";
+  ctx.fillRect(tailX - 4, by + bh, 8, 6);
+  ctx.fillStyle = "#fff8e8";
+  ctx.fillRect(tailX - 3, by + bh - 1, 6, 6);
+  ctx.fillRect(tailX - 2, by + bh + 5, 4, 4);
+  drawPixelText(ctx, text, bx + padX, by + padY, scale, "#2a1810");
 }
 
 function drawNpc(npc) {
   if (!sprites) return;
   const spr = spriteFor(npc);
   const hop = npc.state === "celebrating" ? Math.abs(Math.sin(npc.celebT * 8)) * 14 : 0;
-  const h = npc.state === "cart" ? NPC_H : NPC_H;
-  const widthGuess = (spr.sw / spr.sh) * h;
+  const h = NPC_H;
+  const width = (spr.sw / spr.sh) * h;
   const x = npc.x;
   const y = groundY() - h - npc.bob - hop;
   const flip = npc.facing < 0;
   drawSprite(ctx, spr, x, y, h, flip);
-  return widthGuess;
+  drawBubble(npc, x, y, width);
+  return width;
 }
 
 function drawCaption() {
@@ -363,6 +514,7 @@ loadAllSprites()
 if (window.arcade) {
   window.arcade.onEvent(handleEvent);
   window.arcade.onQueryCount(reportCount);
+  if (window.arcade.onLayout) window.arcade.onLayout(applyLayout);
 }
 
 requestAnimationFrame(frame);

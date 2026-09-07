@@ -1,6 +1,14 @@
 # Sale Arcade
 
-A click-through 16-bit overlay for your Mac. When someone hits your Shopify store, a door opens on the bottom-right of the desktop and a shopper walks in. Add-to-cart puts them behind a shopping cart. A purchase fills the screen with arcade fireworks.
+A click-through 16-bit overlay for your Mac. One browser session is one NPC for the whole visit.
+
+| Customer | Same NPC |
+| --- | --- |
+| Lands on the store | Walks in through the door |
+| Adds to cart | Shopping cart appears with that NPC |
+| Pays | Fireworks around that NPC; they stay on stage |
+| Leaves the site (~25s without heartbeats) | Walks back through the door |
+| Logged-in member | First name in a chat bubble that follows them |
 
 ## Run the overlay
 
@@ -40,6 +48,8 @@ SHARED_SECRET=<the same secret>
 6. Shopify Admin → **Settings → Customer events → Add custom pixel**. Paste `pixel.js`. Permission: **Analytics**. Connect it.
 
 Restart `npm start`. Browse your store — you should walk in as an NPC.
+
+7. **Member names:** paste `theme-snippet.liquid` before `</body>` in `theme.liquid`. Logged-in customers get a name bubble. Guests have no bubble. Checkout first names still show on purchase even without the snippet.
 
 ## Optional: missed-checkout backup
 

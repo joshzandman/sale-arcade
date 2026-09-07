@@ -8,4 +8,7 @@ contextBridge.exposeInMainWorld("arcade", {
     ipcRenderer.on("arcade-query-count", () => cb());
   },
   sendCount: (n) => ipcRenderer.send("arcade-count", n),
+  onLayout: (cb) => {
+    ipcRenderer.on("arcade-layout", (_event, data) => cb(data));
+  },
 });
