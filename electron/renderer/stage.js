@@ -1141,13 +1141,12 @@ function drawNpc(npc) {
 
 function hoverCardLines(npc) {
   const items = npc.items || [];
-  const small = items.length > 1;
-  const headScale = small ? 1 : 2;
+  const scale = 2;
   const lines = [
     {
-      text: hoverViewLine(npc).slice(0, small ? 28 : 22),
+      text: hoverViewLine(npc).slice(0, 28),
       color: "#fff1a8",
-      scale: headScale,
+      scale,
       align: "center",
     },
   ];
@@ -1156,7 +1155,7 @@ function hoverCardLines(npc) {
     lines.push({
       text: String(loc).slice(0, 22),
       color: "#c8d4e8",
-      scale: headScale,
+      scale,
       align: "center",
     });
   }
@@ -1164,9 +1163,9 @@ function hoverCardLines(npc) {
     let label = item.title || "Item";
     if ((item.qty || 1) > 1) label = `${label} x${item.qty}`;
     lines.push({
-      text: String(label).slice(0, small ? 28 : 22),
+      text: String(label).slice(0, 28),
       color: "#ffe0a0",
-      scale: 1,
+      scale,
       align: "left",
     });
   });
