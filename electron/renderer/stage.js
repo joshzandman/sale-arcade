@@ -33,6 +33,7 @@ let showAllTips = false;
 let settings = {
   landmark: "door",
   storeName: "Zandman's Magic Shop",
+  showStage: true,
 };
 
 function resize() {
@@ -71,6 +72,9 @@ function applySettings(data) {
   }
   if (data.storeName) {
     settings.storeName = String(data.storeName).slice(0, 40);
+  }
+  if (typeof data.showStage === "boolean") {
+    settings.showStage = data.showStage;
   }
 }
 
@@ -1019,6 +1023,7 @@ function stepDoor(dt) {
 }
 
 function drawSidewalk() {
+  if (!settings.showStage) return;
   const y = groundY() - 4;
   const brickW = 32;
   const brickH = 13;

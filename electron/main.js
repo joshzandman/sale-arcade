@@ -33,6 +33,7 @@ let lastSale = "None yet";
 let connected = false;
 let landmark = "door";
 let storeName = "Zandman's Magic Shop";
+let showStage = true;
 let promptWin = null;
 let tipsHeld = false;
 let tipsPinned = false;
@@ -219,13 +220,20 @@ function requestCount() {
 
 function sendSettings() {
   if (!overlay || overlay.isDestroyed()) return;
-  overlay.webContents.send("arcade-settings", { landmark, storeName });
+  overlay.webContents.send("arcade-settings", { landmark, storeName, showStage });
 }
 
 function setLandmark(value) {
   const allowed = ["none", "door", "street", "elevator"];
   landmark = allowed.indexOf(value) >= 0 ? value : "door";
   saveState({ landmark });
+  sendSettings();
+  rebuildMenu();
+}
+
+function setShowStage(value) {
+  showStage = Boolean(value);
+  saveState({ showStage });
   sendSettings();
   rebuildMenu();
 }
@@ -326,6 +334,12 @@ function rebuildMenu() {
           click: () => setLandmark("elevator"),
         },
       ],
+    },
+    {
+      label: "Show stage graphic",
+      type: "checkbox",
+      checked: showStage,
+      click: (item) => setShowStage(item.checked),
     },
     {
       label: "Set store name…",
@@ -650,6 +664,7 @@ app.whenReady().then(() => {
     landmark = saved.landmark;
   }
   if (saved.storeName) storeName = String(saved.storeName).slice(0, 40);
+  if (typeof saved.showStage === "boolean") showStage = saved.showStage;
   app.setName("Sale Arcade");
   if (process.platform === "darwin") app.dock.hide();
 
