@@ -16,6 +16,8 @@ const waiting = [];
 const pendingCart = new Set();
 const pendingName = new Map();
 const pendingItems = new Map();
+const clientOwner = new Map();
+const sessionAlias = new Map();
 const imageCache = new Map();
 let sprites = null;
 let rockets = [];
@@ -281,10 +283,31 @@ function forgetVisitor(id) {
   pendingCart.delete(id);
   pendingName.delete(id);
   pendingItems.delete(id);
+  for (const [key, owner] of [...clientOwner]) {
+    if (owner === id) clientOwner.delete(key);
+  }
+  for (const [sid, owner] of [...sessionAlias]) {
+    if (owner === id || sid === id) sessionAlias.delete(sid);
+  }
   if (had) {
     reportCount();
     admitWaiting();
   }
+}
+
+function resolveSession(payload) {
+  let sid = (payload && payload.sessionId) || "anon";
+  if (sessionAlias.has(sid)) sid = sessionAlias.get(sid);
+  const key = payload && payload.clientKey;
+  if (key) {
+    const owner = clientOwner.get(key);
+    if (owner && owner !== sid && (npcs.has(owner) || waiting.indexOf(owner) >= 0)) {
+      sessionAlias.set((payload && payload.sessionId) || sid, owner);
+      return owner;
+    }
+    if (!owner || !npcs.has(owner)) clientOwner.set(key, sid);
+  }
+  return sid;
 }
 
 function locationLabel(npc) {
@@ -503,11 +526,13 @@ function handleEvent(payload) {
     pendingCart.clear();
     pendingName.clear();
     pendingItems.clear();
+    clientOwner.clear();
+    sessionAlias.clear();
     reportCount();
     return;
   }
 
-  const id = payload.sessionId || "anon";
+  const id = resolveSession(payload);
   if (isHiddenLocation(payload)) {
     forgetVisitor(id);
     return;

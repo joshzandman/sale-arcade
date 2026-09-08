@@ -1,4 +1,6 @@
 export const BEACON_JS = `(function () {
+  if (window.__saleArcadeBeacon) return;
+  window.__saleArcadeBeacon = true;
   var ENDPOINT = "https://sale-arcade.joshzandman.workers.dev/event";
   function uuid() {
     return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {

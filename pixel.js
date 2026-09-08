@@ -32,7 +32,10 @@ async function sessionId() {
   while (i < 12) {
     try {
       const cookie = await browser.cookie.get("sale_arcade_sid");
-      if (cookie) return String(cookie);
+      if (cookie) {
+        themeOwnsPresence = true;
+        return String(cookie);
+      }
     } catch (err) {}
     i += 1;
     if (i < 12) await sleep(50);
@@ -57,10 +60,18 @@ async function memberName() {
   return "";
 }
 
+let themeOwnsPresence = false;
+
 function send(type, extra) {
   Promise.all([sessionId(), memberName()]).then(function (parts) {
     const sid = parts[0];
     const cookieName = parts[1];
+    if (
+      themeOwnsPresence &&
+      (type === "enter" || type === "heartbeat" || type === "leave")
+    ) {
+      return;
+    }
     const body = Object.assign(
       { sessionId: sid, type: type, secret: SECRET },
       currentPage,

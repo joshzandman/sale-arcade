@@ -71,13 +71,34 @@ function fromStorefront(request) {
   );
 }
 
+async function clientKey(request) {
+  try {
+    const ip =
+      request.headers.get("CF-Connecting-IP") ||
+      (request.headers.get("X-Forwarded-For") || "").split(",")[0].trim();
+    const ua = request.headers.get("User-Agent") || "";
+    const buf = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(`${ip}|${ua}`)
+    );
+    const bytes = new Uint8Array(buf);
+    let out = "";
+    for (let i = 0; i < 8; i += 1) {
+      out += bytes[i].toString(16).padStart(2, "0");
+    }
+    return out;
+  } catch {
+    return undefined;
+  }
+}
+
 import { BEACON_JS } from "./beacon.js";
 
 function beaconResponse() {
   return new Response(BEACON_JS, {
     headers: {
       "content-type": "application/javascript; charset=utf-8",
-      "cache-control": "public, max-age=300",
+      "cache-control": "public, max-age=60",
       "Access-Control-Allow-Origin": "*",
     },
   });
@@ -146,8 +167,10 @@ export class ArcadeRoom {
       if (isHiddenLocation(cf)) {
         return cors(JSON.stringify({ ok: true }));
       }
+      const key = await clientKey(request);
       const payload = JSON.stringify({
         sessionId: String(body.sessionId).slice(0, 80),
+        clientKey: key,
         type: String(body.type).slice(0, 32),
         productTitle: body.productTitle
           ? String(body.productTitle).slice(0, 80)
