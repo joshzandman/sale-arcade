@@ -400,6 +400,11 @@ function hasCart(npc) {
 
 function applyCartPresence(npc) {
   if (!npc) return;
+  if (npc.purchased && !hasCart(npc)) {
+    npc.hadCart = false;
+    if (npc.state === "cart") npc.state = "idle";
+    return;
+  }
   if (hasCart(npc)) {
     npc.hadCart = true;
     if (npc.state === "idle") npc.state = "cart";
@@ -441,6 +446,7 @@ function findCartItem(items, payload, loose) {
 
 function addCartItem(npc, payload) {
   if (!npc) return;
+  npc.purchased = false;
   if (!npc.items) npc.items = [];
   const title = (payload && payload.productTitle) || "";
   const imageUrl =
@@ -500,9 +506,15 @@ function replaceCartItems(npc, items) {
 }
 
 function applyIncomingCart(npc, payload) {
-  if (!npc || !payload || !Array.isArray(payload.items) || !payload.items.length) {
+  if (!npc || !payload || !Array.isArray(payload.items)) return;
+  if (npc.purchased && payload.type !== "cart") {
+    if (!payload.items.length) {
+      npc.items = [];
+      applyCartPresence(npc);
+    }
     return;
   }
+  if (!payload.items.length) return;
   replaceCartItems(npc, payload.items);
 }
 
@@ -755,26 +767,49 @@ function spawnOrRefresh(id, payload) {
   return npc;
 }
 
+function findPurchaseNpc(id, payload) {
+  if (id && npcs.has(id)) return npcs.get(id);
+  const live = [...npcs.values()].filter((n) => n.state !== "leaving");
+  const checking = live.filter((n) => n.checkingOut);
+  if (checking.length) {
+    return checking.sort((a, b) => b.lastEvent - a.lastEvent)[0];
+  }
+  if (payload && payload.firstName) {
+    const first = cleanNamePart(String(payload.firstName).split(" ")[0]).toLowerCase();
+    const named = live.filter(
+      (n) => n.firstName && n.firstName.toLowerCase() === first
+    );
+    if (named.length) return named.sort((a, b) => b.lastEvent - a.lastEvent)[0];
+  }
+  const carts = live.filter((n) => hasCart(n) || n.state === "cart" || n.hadCart);
+  if (carts.length) return carts.sort((a, b) => b.lastEvent - a.lastEvent)[0];
+  if (live.length === 1) return live[0];
+  return null;
+}
+
 function purchase(id, payload) {
-  let npc = npcs.get(id);
+  let npc = findPurchaseNpc(id, payload);
   if (!npc) {
-    if (npcs.size >= MAX_NPCS) {
-      npc = [...npcs.values()][0];
-    } else {
-      npc = spawnOrRefresh(id);
-      if (npcs.has(id)) npc.x = slotX(npc.slot);
-    }
+    npc = spawnOrRefresh(id, payload);
+    if (npc && npcs.has(id)) npc.x = slotX(npc.slot);
+  } else if (payload && payload.sessionId && payload.sessionId !== npc.id) {
+    sessionAlias.set(payload.sessionId, npc.id);
+    if (id && id !== npc.id) sessionAlias.set(id, npc.id);
   }
   if (npc && npcs.has(npc.id)) {
     applyName(npc, payload);
     applyVisit(npc, payload);
+    npc.items = [];
+    npc.hadCart = false;
+    npc.purchased = true;
+    npc.pendingLeave = 0;
+    npc.checkingOut = true;
     npc.state = "celebrating";
     npc.celebT = 0;
     npc.total = payload.total;
     npc.productTitle = payload.productTitle || npc.productTitle;
     npc.lastEvent = Date.now();
-    npc.checkingOut = true;
-    if (npc.state === "leaving") npc.leaveT = 0;
+    npc.leaveT = 0;
   }
   const amount = payload.total ? `$${payload.total}` : "SALE";
   const title = (payload.productTitle || "ORDER").slice(0, 18);

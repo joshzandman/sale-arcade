@@ -333,5 +333,6 @@ analytics.subscribe("checkout_completed", function (event) {
     productTitle: title,
     firstName: firstName,
     lastName: lastName,
+    pageUrl: (currentPage && currentPage.pageUrl) || "https://joshzandman.com/checkouts",
   });
 });
