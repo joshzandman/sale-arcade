@@ -103,6 +103,7 @@ function createOverlay() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      backgroundThrottling: false,
     },
   });
   win.setIgnoreMouseEvents(true, { forward: true });
@@ -396,6 +397,13 @@ function rebuildMenu() {
                 collectionTitle: "Best Sellers",
               });
             }, 2200);
+          },
+        },
+        {
+          label: "Visitor leaves",
+          click: () => {
+            sendEvent({ sessionId: "test-member", type: "leave" });
+            sendEvent({ sessionId: "test-cart", type: "leave" });
           },
         },
         {

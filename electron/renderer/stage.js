@@ -602,7 +602,11 @@ function handleEvent(payload) {
   }
   if (payload.type === "leave") {
     const npc = npcs.get(id);
-    if (npc) npc.state = "leaving";
+    if (npc && npc.state !== "leaving") {
+      npc.state = "leaving";
+      npc.leaveT = 0;
+      npc.targetX = doorX() + 8;
+    }
   }
 }
 
@@ -627,6 +631,7 @@ function spawnOrRefresh(id, payload) {
       (payload.type === "enter" || payload.type === "cart")
     ) {
       existing.state = payload.type === "cart" || existing.hadCart ? "cart" : "idle";
+      existing.leaveT = 0;
     }
     return existing;
   }
@@ -787,6 +792,7 @@ function stepNpc(npc, dt) {
     }
   } else if (npc.state === "leaving") {
     npc.facing = 1;
+    npc.leaveT = (npc.leaveT || 0) + dt;
     if (settings.landmark === "elevator") {
       const cabin = elevatorX() + 10;
       if (npc.x > cabin - 28) requestLandmark();
@@ -811,10 +817,17 @@ function stepNpc(npc, dt) {
         return;
       }
     }
+    if (npc.leaveT > 10) {
+      npcs.delete(npc.id);
+      reportCount();
+      admitWaiting();
+      return;
+    }
   }
 
   if (Date.now() - npc.lastEvent > IDLE_MS && npc.state !== "leaving") {
     npc.state = "leaving";
+    npc.leaveT = 0;
     npc.targetX = doorX() + 8;
   }
 

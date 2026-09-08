@@ -70,6 +70,8 @@ function send(type, extra) {
 }
 
 let beating = false;
+let heartbeatTimer = null;
+let leaveWatching = false;
 let currentPage = {
   pageUrl: "",
   pageTitle: "",
@@ -84,16 +86,46 @@ function pageInfo(event) {
   return { pageUrl: pageUrl, pageTitle: pageTitle };
 }
 
+function stopHeartbeat() {
+  beating = false;
+  if (heartbeatTimer) {
+    try {
+      clearInterval(heartbeatTimer);
+    } catch (err) {}
+    heartbeatTimer = null;
+  }
+}
+
 function startHeartbeat() {
   if (beating) return;
   beating = true;
   try {
-    setInterval(function () {
+    heartbeatTimer = setInterval(function () {
       send("heartbeat", currentPage);
     }, 10000);
   } catch (err) {
+    beating = false;
     return;
   }
+}
+
+function sendLeave() {
+  stopHeartbeat();
+  send("leave");
+}
+
+function startLeaveWatch() {
+  if (leaveWatching) return;
+  leaveWatching = true;
+  function onHide() {
+    sendLeave();
+  }
+  try {
+    self.addEventListener("pagehide", onHide);
+  } catch (err) {}
+  try {
+    self.addEventListener("beforeunload", onHide);
+  } catch (err) {}
 }
 
 analytics.subscribe("page_viewed", function (event) {
@@ -104,6 +136,7 @@ analytics.subscribe("page_viewed", function (event) {
   const cart = payloadFromCart(currentCart());
   send("enter", cart.items.length ? cart : {});
   startHeartbeat();
+  startLeaveWatch();
 });
 
 analytics.subscribe("product_viewed", function (event) {
