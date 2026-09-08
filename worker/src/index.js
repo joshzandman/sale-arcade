@@ -71,8 +71,22 @@ function fromStorefront(request) {
   );
 }
 
+import { BEACON_JS } from "./beacon.js";
+
+function beaconResponse() {
+  return new Response(BEACON_JS, {
+    headers: {
+      "content-type": "application/javascript; charset=utf-8",
+      "cache-control": "public, max-age=300",
+      "Access-Control-Allow-Origin": "*",
+    },
+  });
+}
+
 export default {
   async fetch(request, env) {
+    const url = new URL(request.url);
+    if (url.pathname === "/beacon.js") return beaconResponse();
     const id = env.ARCADE.idFromName("desk");
     return env.ARCADE.get(id).fetch(request);
   },
