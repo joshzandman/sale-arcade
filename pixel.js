@@ -21,11 +21,22 @@ function pick(obj, keys) {
   return String(cur);
 }
 
+function sleep(ms) {
+  return new Promise(function (resolve) {
+    setTimeout(resolve, ms);
+  });
+}
+
 async function sessionId() {
-  try {
-    const cookie = await browser.cookie.get("sale_arcade_sid");
-    if (cookie) return String(cookie);
-  } catch (err) {}
+  let i = 0;
+  while (i < 12) {
+    try {
+      const cookie = await browser.cookie.get("sale_arcade_sid");
+      if (cookie) return String(cookie);
+    } catch (err) {}
+    i += 1;
+    if (i < 12) await sleep(50);
+  }
   let id = await browser.localStorage.getItem("sale_arcade_sid");
   if (!id) {
     id = uuid();

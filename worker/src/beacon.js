@@ -75,6 +75,7 @@ export const BEACON_JS = `(function () {
         post("enter");
       });
   }
+  sid();
   sendEnter();
   setInterval(function () {
     post("heartbeat");
