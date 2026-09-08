@@ -1,5 +1,6 @@
 const MAX_NPCS = 6;
 const IDLE_MS = 25000;
+const CHECKOUT_IDLE_MS = 20 * 60 * 1000;
 const NPC_H = 140;
 const DOOR_H = 196;
 const ELEVATOR_W = 92;
@@ -295,6 +296,27 @@ function forgetVisitor(id) {
   }
 }
 
+function isCheckoutPayload(payload) {
+  if (!payload) return false;
+  if (payload.type === "checkout" || payload.type === "purchase") return true;
+  const url = String(payload.pageUrl || "").toLowerCase();
+  return (
+    url.indexOf("/checkout") >= 0 ||
+    url.indexOf("checkouts") >= 0 ||
+    url.indexOf("thank_you") >= 0
+  );
+}
+
+function keepForCheckout(npc, payload) {
+  if (!npc || !isCheckoutPayload(payload)) return;
+  npc.checkingOut = true;
+  npc.lastEvent = Date.now();
+  if (npc.state === "leaving") {
+    npc.state = hasCart(npc) || npc.hadCart ? "cart" : "idle";
+    npc.leaveT = 0;
+  }
+}
+
 function resolveSession(payload) {
   let sid = (payload && payload.sessionId) || "anon";
   if (sessionAlias.has(sid)) sid = sessionAlias.get(sid);
@@ -538,7 +560,8 @@ function handleEvent(payload) {
     return;
   }
   if (payload.type === "enter") {
-    spawnOrRefresh(id, payload);
+    const npc = spawnOrRefresh(id, payload);
+    if (npc && npcs.has(id)) keepForCheckout(npc, payload);
     return;
   }
   if (payload.type === "view" || payload.type === "browse") {
@@ -558,7 +581,18 @@ function handleEvent(payload) {
       applyName(npc, payload);
       applyVisit(npc, payload);
       applyIncomingCart(npc, payload);
+      keepForCheckout(npc, payload);
       if (isHiddenLocation(npc)) forgetVisitor(id);
+    }
+    return;
+  }
+  if (payload.type === "checkout") {
+    const npc = npcs.get(id) || spawnOrRefresh(id, payload);
+    if (npc && npcs.has(id)) {
+      applyName(npc, payload);
+      applyVisit(npc, payload);
+      applyIncomingCart(npc, payload);
+      keepForCheckout(npc, payload);
     }
     return;
   }
@@ -628,6 +662,10 @@ function handleEvent(payload) {
   }
   if (payload.type === "leave") {
     const npc = npcs.get(id);
+    if (npc && npc.checkingOut) {
+      npc.lastEvent = Date.now();
+      return;
+    }
     if (npc && npc.state !== "leaving") {
       npc.state = "leaving";
       npc.leaveT = 0;
@@ -651,10 +689,13 @@ function spawnOrRefresh(id, payload) {
       return null;
     }
     applyIncomingCart(existing, payload);
+    keepForCheckout(existing, payload);
     if (
       existing.state === "leaving" &&
       payload &&
-      (payload.type === "enter" || payload.type === "cart")
+      (payload.type === "enter" ||
+        payload.type === "cart" ||
+        payload.type === "checkout")
     ) {
       existing.state = payload.type === "cart" || existing.hadCart ? "cart" : "idle";
       existing.leaveT = 0;
@@ -691,6 +732,7 @@ function spawnOrRefresh(id, payload) {
   applyName(npc, payload);
   applyVisit(npc, payload);
   applyIncomingCart(npc, payload);
+  keepForCheckout(npc, payload);
   if (pendingName.has(id)) {
     applyName(npc, { firstName: pendingName.get(id) });
     pendingName.delete(id);
@@ -726,6 +768,8 @@ function purchase(id, payload) {
     npc.total = payload.total;
     npc.productTitle = payload.productTitle || npc.productTitle;
     npc.lastEvent = Date.now();
+    npc.checkingOut = true;
+    if (npc.state === "leaving") npc.leaveT = 0;
   }
   const amount = payload.total ? `$${payload.total}` : "SALE";
   const title = (payload.productTitle || "ORDER").slice(0, 18);
@@ -851,9 +895,11 @@ function stepNpc(npc, dt) {
     }
   }
 
-  if (Date.now() - npc.lastEvent > IDLE_MS && npc.state !== "leaving") {
+  const idleMs = npc.checkingOut ? CHECKOUT_IDLE_MS : IDLE_MS;
+  if (Date.now() - npc.lastEvent > idleMs && npc.state !== "leaving") {
     npc.state = "leaving";
     npc.leaveT = 0;
+    npc.checkingOut = false;
     npc.targetX = doorX() + 8;
   }
 

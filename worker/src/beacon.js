@@ -77,12 +77,35 @@ export const BEACON_JS = `(function () {
         post("enter");
       });
   }
+  var goingToCheckout = false;
+  function marksCheckout(el) {
+    if (!el || !el.getAttribute) return false;
+    var blob = [
+      el.getAttribute("href") || "",
+      el.getAttribute("action") || "",
+      el.getAttribute("name") || "",
+      el.id || "",
+      el.className || ""
+    ].join(" ").toLowerCase();
+    return blob.indexOf("checkout") >= 0 || blob.indexOf("shop-pay") >= 0;
+  }
+  document.addEventListener("click", function (event) {
+    var el = event.target;
+    while (el && el !== document) {
+      if (marksCheckout(el)) {
+        goingToCheckout = true;
+        break;
+      }
+      el = el.parentNode;
+    }
+  }, true);
   sid();
   sendEnter();
   setInterval(function () {
     post("heartbeat");
   }, 10000);
   window.addEventListener("pagehide", function () {
+    if (goingToCheckout) return;
     post("leave");
   });
 })();

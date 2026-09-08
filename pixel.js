@@ -62,12 +62,24 @@ async function memberName() {
 
 let themeOwnsPresence = false;
 
+function isCheckoutUrl(url) {
+  const value = String(url || "").toLowerCase();
+  return (
+    value.indexOf("/checkout") >= 0 ||
+    value.indexOf("checkouts") >= 0 ||
+    value.indexOf("thank_you") >= 0
+  );
+}
+
 function send(type, extra) {
   Promise.all([sessionId(), memberName()]).then(function (parts) {
     const sid = parts[0];
     const cookieName = parts[1];
+    const pageUrl = (extra && extra.pageUrl) || currentPage.pageUrl || "";
+    const onCheckout = isCheckoutUrl(pageUrl);
     if (
       themeOwnsPresence &&
+      !onCheckout &&
       (type === "enter" || type === "heartbeat" || type === "leave")
     ) {
       return;
@@ -271,8 +283,34 @@ analytics.subscribe("cart_viewed", function (event) {
   send("cart_sync", payload);
 });
 
-analytics.subscribe("checkout_started", function () {
-  send("cart");
+analytics.subscribe("checkout_started", function (event) {
+  const checkout = event.data && event.data.checkout;
+  send("checkout", {
+    pageUrl: (currentPage && currentPage.pageUrl) || "https://joshzandman.com/checkouts",
+    pageTitle: "Checkout",
+    firstName:
+      pick(checkout, ["billingAddress", "firstName"]) ||
+      pick(checkout, ["shippingAddress", "firstName"]),
+    lastName:
+      pick(checkout, ["billingAddress", "lastName"]) ||
+      pick(checkout, ["shippingAddress", "lastName"]),
+  });
+});
+
+analytics.subscribe("checkout_contact_info_submitted", function () {
+  send("checkout", { pageUrl: currentPage.pageUrl || "https://joshzandman.com/checkouts" });
+});
+
+analytics.subscribe("checkout_address_info_submitted", function () {
+  send("checkout", { pageUrl: currentPage.pageUrl || "https://joshzandman.com/checkouts" });
+});
+
+analytics.subscribe("checkout_shipping_info_submitted", function () {
+  send("checkout", { pageUrl: currentPage.pageUrl || "https://joshzandman.com/checkouts" });
+});
+
+analytics.subscribe("payment_info_submitted", function () {
+  send("checkout", { pageUrl: currentPage.pageUrl || "https://joshzandman.com/checkouts" });
 });
 
 analytics.subscribe("checkout_completed", function (event) {
