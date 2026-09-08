@@ -7,6 +7,7 @@ const {
   screen,
   ipcMain,
   globalShortcut,
+  powerMonitor,
 } = require("electron");
 const path = require("path");
 const fs = require("fs");
@@ -23,6 +24,9 @@ let overlay;
 let tray;
 let socket;
 let reconnectTimer;
+let socketGen = 0;
+let appEnv = {};
+let wakeTimer = null;
 let muted = false;
 let visitorCount = 0;
 let lastSale = "None yet";
@@ -473,6 +477,21 @@ function connectWorker(env) {
     rebuildMenu();
     return;
   }
+  const gen = ++socketGen;
+  clearTimeout(reconnectTimer);
+  if (socket) {
+    socket.removeAllListeners();
+    try {
+      socket.terminate();
+    } catch {
+      try {
+        socket.close();
+      } catch {
+        /* already dead */
+      }
+    }
+    socket = null;
+  }
   const wsUrl = url.includes("?")
     ? `${url}&secret=${encodeURIComponent(secret)}`
     : `${url}?secret=${encodeURIComponent(secret)}`;
@@ -486,11 +505,13 @@ function connectWorker(env) {
   }
 
   socket.on("open", () => {
+    if (gen !== socketGen) return;
     connected = true;
     console.log("arcade connected", url);
     rebuildMenu();
   });
   socket.on("message", (data) => {
+    if (gen !== socketGen) return;
     try {
       const payload = JSON.parse(String(data));
       console.log("arcade event", payload && payload.type, payload && payload.sessionId);
@@ -500,18 +521,74 @@ function connectWorker(env) {
     }
   });
   socket.on("close", () => {
+    if (gen !== socketGen) return;
     connected = false;
     rebuildMenu();
     scheduleReconnect(env);
   });
   socket.on("error", () => {
-    socket.close();
+    if (gen !== socketGen) return;
+    try {
+      socket.close();
+    } catch {
+      /* already closing */
+    }
   });
 }
 
 function scheduleReconnect(env) {
   clearTimeout(reconnectTimer);
   reconnectTimer = setTimeout(() => connectWorker(env), 4000);
+}
+
+function restoreOverlayLayer() {
+  if (!overlay || overlay.isDestroyed()) return;
+  overlay.setIgnoreMouseEvents(true, { forward: true });
+  overlay.setAlwaysOnTop(true, "screen-saver");
+  overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  overlay.showInactive();
+}
+
+function attachOverlay(win) {
+  win.webContents.on("did-finish-load", () => {
+    sendLayout();
+    sendSettings();
+    sendTips(tipsVisible());
+    sendEvent({ type: "mute", muted });
+  });
+  win.webContents.on("render-process-gone", () => {
+    console.error("overlay renderer gone");
+    setTimeout(() => reviveOverlay(true), 300);
+  });
+}
+
+function reviveOverlay(reload) {
+  if (!overlay || overlay.isDestroyed()) {
+    overlay = createOverlay();
+    attachOverlay(overlay);
+    return;
+  }
+  restoreOverlayLayer();
+  relayout();
+  if (reload || overlay.webContents.isCrashed()) {
+    overlay.reload();
+    return;
+  }
+  overlay.webContents.send("arcade-wake");
+}
+
+function onSystemWake() {
+  console.log("arcade wake");
+  registerTipsShortcut();
+  reviveOverlay(false);
+  connectWorker(appEnv);
+  rebuildMenu();
+}
+
+function scheduleWake() {
+  clearTimeout(wakeTimer);
+  wakeTimer = setTimeout(onSystemWake, 600);
+  setTimeout(onSystemWake, 3500);
 }
 
 ipcMain.on("arcade-count", (_event, count) => {
@@ -567,6 +644,7 @@ function registerTipsShortcut() {
 
 app.whenReady().then(() => {
   const env = { ...process.env, ...loadEnv() };
+  appEnv = env;
   const saved = loadState();
   if (["none", "door", "street", "elevator"].indexOf(saved.landmark) >= 0) {
     landmark = saved.landmark;
@@ -576,6 +654,7 @@ app.whenReady().then(() => {
   if (process.platform === "darwin") app.dock.hide();
 
   overlay = createOverlay();
+  attachOverlay(overlay);
   registerTipsShortcut();
   startTipsWatcher();
   tray = new Tray(makeTrayIcon());
@@ -585,10 +664,6 @@ app.whenReady().then(() => {
   rebuildMenu();
 
   overlay.webContents.on("did-finish-load", () => {
-    sendLayout();
-    sendSettings();
-    sendTips(tipsVisible());
-    sendEvent({ type: "mute", muted });
     if (process.argv.includes("--demo")) {
       sendEvent({ sessionId: "demo-1", type: "enter" });
       setTimeout(() => {
@@ -640,6 +715,8 @@ app.whenReady().then(() => {
   screen.on("display-added", relayout);
   screen.on("display-removed", relayout);
   screen.on("display-metrics-changed", relayout);
+  powerMonitor.on("resume", scheduleWake);
+  powerMonitor.on("unlock-screen", scheduleWake);
 });
 
 function layoutPayload() {

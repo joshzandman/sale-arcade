@@ -1284,26 +1284,35 @@ function drawCaption() {
   drawPixelText(ctx, text, x, y, scale, "#fff1a8");
 }
 
-function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000);
-  last = now;
-  stepDoor(dt);
-  stepElevator(dt);
-  for (const npc of [...npcs.values()]) stepNpc(npc, dt);
-  rockets = stepFireworks(rockets);
+let loopId = 0;
 
-  ctx.clearRect(0, 0, cssW, cssH);
-  drawSidewalk();
-  drawLandmark();
-  const ordered = [...npcs.values()].sort((a, b) => a.x - b.x);
-  for (const npc of ordered) drawNpc(npc);
-  if (showAllTips) {
-    for (const npc of ordered) {
-      if (npcVisible(npc)) drawHoverCard(npc);
+function startLoop() {
+  loopId += 1;
+  const id = loopId;
+  last = performance.now();
+  function frame(now) {
+    if (id !== loopId) return;
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    stepDoor(dt);
+    stepElevator(dt);
+    for (const npc of [...npcs.values()]) stepNpc(npc, dt);
+    rockets = stepFireworks(rockets);
+
+    ctx.clearRect(0, 0, cssW, cssH);
+    drawSidewalk();
+    drawLandmark();
+    const ordered = [...npcs.values()].sort((a, b) => a.x - b.x);
+    for (const npc of ordered) drawNpc(npc);
+    if (showAllTips) {
+      for (const npc of ordered) {
+        if (npcVisible(npc)) drawHoverCard(npc);
+      }
     }
+    drawFireworks(ctx, rockets);
+    drawCaption();
+    requestAnimationFrame(frame);
   }
-  drawFireworks(ctx, rockets);
-  drawCaption();
   requestAnimationFrame(frame);
 }
 
@@ -1325,6 +1334,12 @@ if (window.arcade) {
       showAllTips = Boolean(data && data.all);
     });
   }
+  if (window.arcade.onWake) {
+    window.arcade.onWake(() => {
+      resize();
+      startLoop();
+    });
+  }
 }
 
-requestAnimationFrame(frame);
+startLoop();
