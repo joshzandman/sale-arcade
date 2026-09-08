@@ -77,7 +77,7 @@ export const BEACON_JS = `(function () {
         post("enter");
       });
   }
-  var goingToCheckout = false;
+  var stayingOnSite = false;
   function marksCheckout(el) {
     if (!el || !el.getAttribute) return false;
     var blob = [
@@ -89,11 +89,22 @@ export const BEACON_JS = `(function () {
     ].join(" ").toLowerCase();
     return blob.indexOf("checkout") >= 0 || blob.indexOf("shop-pay") >= 0;
   }
+  function sameSiteLink(el) {
+    if (!el || el.tagName !== "A") return false;
+    var href = el.getAttribute("href") || "";
+    if (!href || href.indexOf("#") === 0 || href.indexOf("javascript:") === 0) return false;
+    try {
+      var next = new URL(href, location.href);
+      return next.origin === location.origin;
+    } catch (err) {
+      return href.indexOf("/") === 0 || href.indexOf("?") === 0;
+    }
+  }
   document.addEventListener("click", function (event) {
     var el = event.target;
     while (el && el !== document) {
-      if (marksCheckout(el)) {
-        goingToCheckout = true;
+      if (marksCheckout(el) || sameSiteLink(el)) {
+        stayingOnSite = true;
         break;
       }
       el = el.parentNode;
@@ -105,7 +116,7 @@ export const BEACON_JS = `(function () {
     post("heartbeat");
   }, 10000);
   window.addEventListener("pagehide", function () {
-    if (goingToCheckout) return;
+    if (stayingOnSite) return;
     post("leave");
   });
 })();

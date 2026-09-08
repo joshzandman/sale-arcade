@@ -1,6 +1,7 @@
 const MAX_NPCS = 6;
 const IDLE_MS = 25000;
 const CHECKOUT_IDLE_MS = 20 * 60 * 1000;
+const LEAVE_GRACE_MS = 3000;
 const NPC_H = 140;
 const DOOR_H = 196;
 const ELEVATOR_W = 92;
@@ -561,13 +562,17 @@ function handleEvent(payload) {
   }
   if (payload.type === "enter") {
     const npc = spawnOrRefresh(id, payload);
-    if (npc && npcs.has(id)) keepForCheckout(npc, payload);
+    if (npc && npcs.has(id)) {
+      npc.pendingLeave = 0;
+      keepForCheckout(npc, payload);
+    }
     return;
   }
   if (payload.type === "view" || payload.type === "browse") {
     const npc = npcs.get(id) || spawnOrRefresh(id, payload);
     if (npc && npcs.has(id)) {
       npc.lastEvent = Date.now();
+      npc.pendingLeave = 0;
       applyName(npc, payload);
       applyVisit(npc, payload);
       if (isHiddenLocation(npc)) forgetVisitor(id);
@@ -578,6 +583,7 @@ function handleEvent(payload) {
     const npc = npcs.get(id);
     if (npc && npc.state !== "leaving") {
       npc.lastEvent = Date.now();
+      npc.pendingLeave = 0;
       applyName(npc, payload);
       applyVisit(npc, payload);
       applyIncomingCart(npc, payload);
@@ -610,6 +616,7 @@ function handleEvent(payload) {
     }
     applyName(npc, payload);
     applyVisit(npc, payload);
+    npc.pendingLeave = 0;
     npc.hadCart = true;
     npc.productTitle = payload.productTitle || npc.productTitle;
     npc.lastEvent = Date.now();
@@ -664,13 +671,10 @@ function handleEvent(payload) {
     const npc = npcs.get(id);
     if (npc && npc.checkingOut) {
       npc.lastEvent = Date.now();
+      npc.pendingLeave = 0;
       return;
     }
-    if (npc && npc.state !== "leaving") {
-      npc.state = "leaving";
-      npc.leaveT = 0;
-      npc.targetX = doorX() + 8;
-    }
+    if (npc && npc.state !== "leaving") npc.pendingLeave = Date.now();
   }
 }
 
@@ -682,6 +686,7 @@ function spawnOrRefresh(id, payload) {
   const existing = npcs.get(id);
   if (existing) {
     existing.lastEvent = Date.now();
+    existing.pendingLeave = 0;
     applyName(existing, payload);
     applyVisit(existing, payload);
     if (isHiddenLocation(existing)) {
@@ -893,6 +898,18 @@ function stepNpc(npc, dt) {
       admitWaiting();
       return;
     }
+  }
+
+  if (
+    npc.pendingLeave &&
+    Date.now() - npc.pendingLeave > LEAVE_GRACE_MS &&
+    npc.state !== "leaving" &&
+    !npc.checkingOut
+  ) {
+    npc.state = "leaving";
+    npc.leaveT = 0;
+    npc.pendingLeave = 0;
+    npc.targetX = doorX() + 8;
   }
 
   const idleMs = npc.checkingOut ? CHECKOUT_IDLE_MS : IDLE_MS;
@@ -1163,18 +1180,34 @@ function spriteFor(npc) {
   return sprites.idle;
 }
 
+function nameBubbleLines(npc) {
+  const scale = 1;
+  const maxW = 16 * 6 * scale;
+  const first = npc.firstName || "";
+  const last = npc.lastName || "";
+  const full = last ? `${first} ${last}` : first;
+  if (measurePixelText(full, scale) <= maxW) return [full];
+  if (
+    last &&
+    measurePixelText(first, scale) <= maxW &&
+    measurePixelText(last, scale) <= maxW
+  ) {
+    return [first, last];
+  }
+  return wrapPixelText(full, scale, maxW, 2);
+}
+
 function drawBubble(npc, x, y, width) {
   if (!npc.firstName) return;
-  const scale = 2;
-  const text = npc.lastName
-    ? `${npc.firstName} ${npc.lastName}`
-    : npc.firstName;
-  const gaps = (text.match(/ /g) || []).length;
-  const tw = (text.length - gaps) * 6 * scale + gaps * 4 * scale;
+  const scale = 1;
+  const lines = nameBubbleLines(npc);
   const padX = 6;
-  const padY = 5;
+  const padY = 4;
+  const gap = 3;
+  const widths = lines.map((line) => measurePixelText(line, scale));
+  const tw = Math.max.apply(null, widths.concat([0]));
   const bw = tw + padX * 2;
-  const bh = 7 * scale + padY * 2;
+  const bh = lines.length * (7 * scale) + (lines.length - 1) * gap + padY * 2;
   let bx = Math.round(x + width / 2 - bw / 2);
   let by = Math.round(y - bh - 14);
   bx = Math.max(stage.left + 4, Math.min(bx, stage.left + stage.width - bw - 4));
@@ -1189,7 +1222,18 @@ function drawBubble(npc, x, y, width) {
   ctx.fillStyle = "#fff8e8";
   ctx.fillRect(tailX - 3, by + bh - 1, 6, 6);
   ctx.fillRect(tailX - 2, by + bh + 5, 4, 4);
-  drawPixelText(ctx, text, bx + padX, by + padY, scale, "#2a1810");
+  let ty = by + padY;
+  lines.forEach((line, i) => {
+    drawPixelText(
+      ctx,
+      line,
+      bx + Math.round((bw - widths[i]) / 2),
+      ty,
+      scale,
+      "#2a1810"
+    );
+    ty += 7 * scale + gap;
+  });
 }
 
 function drawCartItems(npc, x, y, width, height, flip) {
@@ -1317,7 +1361,7 @@ function drawHoverCard(npc) {
   });
   const bh = contentH + padY * 2;
   const b = npc.bounds || { x: npc.x, y: groundY() - NPC_H, w: 80 };
-  const nameLift = npc.firstName ? 52 : 0;
+  const nameLift = npc.firstName ? 58 : 0;
   let bx = Math.round(b.x + b.w / 2 - bw / 2);
   let by = Math.round((b.y || groundY() - NPC_H) - bh - 10 - nameLift);
   bx = Math.max(stage.left + 4, Math.min(bx, stage.left + stage.width - bw - 4));
