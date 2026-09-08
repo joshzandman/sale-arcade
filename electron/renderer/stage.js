@@ -532,6 +532,7 @@ function handleEvent(payload) {
       npc.lastEvent = Date.now();
       applyName(npc, payload);
       applyVisit(npc, payload);
+      applyIncomingCart(npc, payload);
       if (isHiddenLocation(npc)) forgetVisitor(id);
     }
     return;

@@ -60,6 +60,17 @@ function isHiddenLocation(cf) {
   return !code && !region && (country === "US" || !country);
 }
 
+const STORE_HOSTS = ["joshzandman.com", "joshzandman.myshopify.com"];
+const PRESENCE_TYPES = { enter: true, heartbeat: true, leave: true };
+
+function fromStorefront(request) {
+  const origin = (request.headers.get("Origin") || "").toLowerCase();
+  const referer = (request.headers.get("Referer") || "").toLowerCase();
+  return STORE_HOSTS.some(
+    (host) => origin.indexOf(host) >= 0 || referer.indexOf(host) >= 0
+  );
+}
+
 export default {
   async fetch(request, env) {
     const id = env.ARCADE.idFromName("desk");
@@ -108,11 +119,14 @@ export class ArcadeRoom {
         (body && body.secret) ||
         url.searchParams.get("secret") ||
         (request.headers.get("Authorization") || "").replace("Bearer ", "");
-      if (!this.env.SHARED_SECRET || secret !== this.env.SHARED_SECRET) {
-        return cors(JSON.stringify({ error: "unauthorized" }), 401);
-      }
       if (!body || !body.type || !body.sessionId) {
         return cors(JSON.stringify({ error: "need type and sessionId" }), 400);
+      }
+      const authed = this.env.SHARED_SECRET && secret === this.env.SHARED_SECRET;
+      const presence =
+        fromStorefront(request) && PRESENCE_TYPES[String(body.type)];
+      if (!authed && !presence) {
+        return cors(JSON.stringify({ error: "unauthorized" }), 401);
       }
       const cf = request.cf || {};
       if (isHiddenLocation(cf)) {

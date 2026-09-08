@@ -22,6 +22,10 @@ function pick(obj, keys) {
 }
 
 async function sessionId() {
+  try {
+    const cookie = await browser.cookie.get("sale_arcade_sid");
+    if (cookie) return String(cookie);
+  } catch (err) {}
   let id = await browser.localStorage.getItem("sale_arcade_sid");
   if (!id) {
     id = uuid();
@@ -127,6 +131,11 @@ function startLeaveWatch() {
     self.addEventListener("beforeunload", onHide);
   } catch (err) {}
 }
+
+analytics.subscribe("form_submitted", function (event) {
+  const cart = payloadFromCart(currentCart());
+  send("enter", cart.items.length ? cart : {});
+});
 
 analytics.subscribe("page_viewed", function (event) {
   currentPage = Object.assign(pageInfo(event), {
