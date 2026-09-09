@@ -1167,6 +1167,12 @@ function drawElevator() {
     ctx.fillStyle = "#c9a24a";
     ctx.fillRect(x + 10, y + 22, w - 20, cabinH - 36);
   }
+  if (sprites && sprites.attendant && doors > 0.28) {
+    const ah = 112;
+    const ax = x + 8;
+    const ay = y + cabinH - ah - 8;
+    drawSprite(ctx, sprites.attendant, ax, ay, ah, true);
+  }
   const gap = Math.round(((w - 8) / 2) * doors);
   const leftDoorW = Math.round((w - 8) / 2) - gap;
   const rightDoorW = Math.round((w - 8) / 2) - gap;
