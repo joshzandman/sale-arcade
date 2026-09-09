@@ -187,6 +187,21 @@ function cleanPageTitle(title) {
     .trim();
 }
 
+function shopifyPageHandle(path) {
+  const i = path.findIndex((p) => String(p).toLowerCase() === "pages");
+  return i >= 0 ? String(path[i + 1] || "").toLowerCase() : "";
+}
+
+function isAboutPage(handle, title) {
+  const h = String(handle || "").toLowerCase();
+  const t = String(title || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  if (h === "about" || h === "about-us" || h.startsWith("about-")) return true;
+  return t === "about" || t === "about us";
+}
+
 function cartishType(type) {
   return (
     type === "cart" ||
@@ -211,12 +226,12 @@ function visitInfo(payload, npc) {
     title = "Home";
   } else if (path[0] === "collections" && path[1]) {
     title = prettySlug(path[1]);
-  } else if (path[0] === "pages") {
+  } else if (path.some((p) => String(p).toLowerCase() === "pages")) {
+    const handle = shopifyPageHandle(path);
     title = payload.pageTitle
       ? cleanPageTitle(payload.pageTitle)
-      : prettySlug(path[1] || path[path.length - 1]);
-    const isAboutPage = String(path[1] || "").toLowerCase() === "about";
-    if (!isAboutPage) {
+      : prettySlug(handle || path[path.length - 1]);
+    if (!isAboutPage(handle, title)) {
       title = String(title)
         .replace(/\s+instructions$/i, "")
         .trim();
@@ -596,7 +611,7 @@ function handleEvent(payload) {
     return;
   }
   if (payload.type === "view" || payload.type === "browse") {
-    const npc = npcs.get(id) || spawnOrRefresh(id, payload);
+    const npc = npcs.get(id);
     if (npc && npcs.has(id)) {
       npc.lastEvent = Date.now();
       npc.pendingLeave = 0;

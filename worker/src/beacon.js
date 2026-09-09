@@ -110,13 +110,42 @@ export const BEACON_JS = `(function () {
       el = el.parentNode;
     }
   }, true);
+  var announced = false;
+  var heartbeatTimer = null;
+  function pageIsLive() {
+    if (document.prerendering) return false;
+    if (document.visibilityState && document.visibilityState !== "visible") return false;
+    if (typeof document.hasFocus === "function" && !document.hasFocus()) return false;
+    return true;
+  }
+  function startPresence() {
+    if (announced) return;
+    if (!pageIsLive()) return;
+    announced = true;
+    sendEnter();
+    heartbeatTimer = setInterval(function () {
+      post("heartbeat");
+    }, 10000);
+  }
   sid();
-  sendEnter();
-  setInterval(function () {
-    post("heartbeat");
-  }, 10000);
+  startPresence();
+  document.addEventListener("prerenderingchange", startPresence);
+  document.addEventListener("visibilitychange", startPresence);
+  window.addEventListener("focus", startPresence);
+  window.addEventListener("pageshow", function (event) {
+    if (event.persisted) {
+      announced = false;
+      startPresence();
+    }
+  });
   window.addEventListener("pagehide", function () {
+    if (!announced) return;
     if (stayingOnSite) return;
+    announced = false;
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
     post("leave");
   });
 })();

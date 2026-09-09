@@ -71,12 +71,29 @@ function isCheckoutUrl(url) {
   );
 }
 
+function isSpeculative() {
+  try {
+    if (typeof document !== "undefined" && document.prerendering) return true;
+  } catch (err) {}
+  return false;
+}
+
 function send(type, extra) {
   Promise.all([sessionId(), memberName()]).then(function (parts) {
     const sid = parts[0];
     const cookieName = parts[1];
     const pageUrl = (extra && extra.pageUrl) || currentPage.pageUrl || "";
     const onCheckout = isCheckoutUrl(pageUrl);
+    if (
+      isSpeculative() &&
+      (type === "enter" ||
+        type === "heartbeat" ||
+        type === "leave" ||
+        type === "view" ||
+        type === "browse")
+    ) {
+      return;
+    }
     if (
       themeOwnsPresence &&
       !onCheckout &&
