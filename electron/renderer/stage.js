@@ -215,10 +215,13 @@ function visitInfo(payload, npc) {
     title = payload.pageTitle
       ? cleanPageTitle(payload.pageTitle)
       : prettySlug(path[1] || path[path.length - 1]);
-    title = String(title)
-      .replace(/\s+instructions$/i, "")
-      .trim();
-    title = title ? `${title} instructions` : "instructions";
+    const isAboutPage = String(path[1] || "").toLowerCase() === "about";
+    if (!isAboutPage) {
+      title = String(title)
+        .replace(/\s+instructions$/i, "")
+        .trim();
+      title = title ? `${title} instructions` : "instructions";
+    }
   } else if (path[0] === "cart") {
     title = "Cart";
   } else if (payload.pageTitle) {
