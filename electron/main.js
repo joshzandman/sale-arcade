@@ -14,6 +14,7 @@ const fs = require("fs");
 const { WebSocket } = require("ws");
 const { startOrderPoll } = require("./orders");
 const hidKeys = require("./hid-keys");
+const { LANDMARKS } = require("./renderer/logic");
 
 const ROOT = app.isPackaged
   ? process.resourcesPath
@@ -224,8 +225,7 @@ function sendSettings() {
 }
 
 function setLandmark(value) {
-  const allowed = ["none", "door", "street", "elevator"];
-  landmark = allowed.indexOf(value) >= 0 ? value : "door";
+  landmark = LANDMARKS.indexOf(value) >= 0 ? value : "door";
   saveState({ landmark });
   sendSettings();
   rebuildMenu();
@@ -660,7 +660,7 @@ app.whenReady().then(() => {
   const env = { ...process.env, ...loadEnv() };
   appEnv = env;
   const saved = loadState();
-  if (["none", "door", "street", "elevator"].indexOf(saved.landmark) >= 0) {
+  if (LANDMARKS.indexOf(saved.landmark) >= 0) {
     landmark = saved.landmark;
   }
   if (saved.storeName) storeName = String(saved.storeName).slice(0, 40);

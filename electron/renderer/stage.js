@@ -1,7 +1,4 @@
-const MAX_NPCS = 6;
-const IDLE_MS = 25000;
-const CHECKOUT_IDLE_MS = 20 * 60 * 1000;
-const LEAVE_GRACE_MS = 3000;
+const MAX_NPCS = SaleArcade.MAX_NPCS;
 const NPC_H = 140;
 const DOOR_H = 196;
 const ELEVATOR_W = 92;
@@ -13,14 +10,9 @@ let cssW = window.innerWidth;
 let cssH = window.innerHeight;
 let stage = { left: 0, top: 0, width: cssW, height: cssH };
 
-const npcs = new Map();
-const waiting = [];
-const pendingCart = new Set();
-const pendingName = new Map();
-const pendingItems = new Map();
-const clientOwner = new Map();
-const sessionAlias = new Map();
 const imageCache = new Map();
+let arcade = null;
+let npcs = new Map();
 let sprites = null;
 let rockets = [];
 let caption = null;
@@ -62,7 +54,7 @@ function applyLayout(data) {
 
 function applySettings(data) {
   if (!data) return;
-  if (["none", "door", "street", "elevator"].indexOf(data.landmark) >= 0) {
+  if (SaleArcade.LANDMARKS.indexOf(data.landmark) >= 0) {
     if (settings.landmark !== data.landmark) {
       elevator = { phase: "hidden", rise: 0, doors: 0, hold: 0 };
       door = { phase: "closed", t: 0 };
@@ -145,120 +137,8 @@ function slotX(index) {
   return left + ((index + 0.5) * span) / MAX_NPCS;
 }
 
-function nextSlot() {
-  const used = new Set([...npcs.values()].map((n) => n.slot));
-  for (let i = 0; i < MAX_NPCS; i += 1) if (!used.has(i)) return i;
-  return 0;
-}
-
 function reportCount() {
   if (window.arcade) window.arcade.sendCount(npcs.size);
-}
-
-function cleanNamePart(value) {
-  return String(value || "")
-    .replace(/\+/g, " ")
-    .replace(/\s+/g, " ")
-    .replace(/[^a-zA-Z0-9 '\-]/g, "")
-    .trim();
-}
-
-function urlPath(url) {
-  try {
-    return new URL(url).pathname.split("/").filter(Boolean);
-  } catch (err) {
-    return [];
-  }
-}
-
-function prettySlug(slug) {
-  try {
-    return decodeURIComponent(String(slug || ""))
-      .replace(/-/g, " ")
-      .trim();
-  } catch (err) {
-    return String(slug || "").replace(/-/g, " ").trim();
-  }
-}
-
-function cleanPageTitle(title) {
-  return String(title || "")
-    .split(/\s+[|\-–—]\s+/)[0]
-    .trim();
-}
-
-function shopifyPageHandle(path) {
-  const i = path.findIndex((p) => String(p).toLowerCase() === "pages");
-  return i >= 0 ? String(path[i + 1] || "").toLowerCase() : "";
-}
-
-function isAboutPage(handle, title) {
-  const h = String(handle || "").toLowerCase();
-  const t = String(title || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-  if (h === "about" || h === "about-us" || h.startsWith("about-")) return true;
-  return t === "about" || t === "about us";
-}
-
-function cartishType(type) {
-  return (
-    type === "cart" ||
-    type === "cart_remove" ||
-    type === "cart_sync" ||
-    type === "cart_empty" ||
-    type === "purchase"
-  );
-}
-
-function visitInfo(payload, npc) {
-  const hasUrl = Boolean(payload.pageUrl);
-  const path = hasUrl ? urlPath(payload.pageUrl) : [];
-  const useProductTitle = payload.productTitle && !cartishType(payload.type);
-  const isProduct = Boolean(useProductTitle) || path[0] === "products";
-  let title = "";
-  if (isProduct) {
-    title = payload.productTitle || prettySlug(path[1]) || "";
-  } else if (payload.collectionTitle) {
-    title = String(payload.collectionTitle);
-  } else if (hasUrl && !path.length) {
-    title = "Home";
-  } else if (path[0] === "collections" && path[1]) {
-    title = prettySlug(path[1]);
-  } else if (path.some((p) => String(p).toLowerCase() === "pages")) {
-    const handle = shopifyPageHandle(path);
-    title = payload.pageTitle
-      ? cleanPageTitle(payload.pageTitle)
-      : prettySlug(handle || path[path.length - 1]);
-    if (!isAboutPage(handle, title)) {
-      title = String(title)
-        .replace(/\s+instructions$/i, "")
-        .trim();
-      title = title ? `${title} instructions` : "instructions";
-    }
-  } else if (path[0] === "cart") {
-    title = "Cart";
-  } else if (payload.pageTitle) {
-    title = cleanPageTitle(payload.pageTitle);
-  } else if (path.length) {
-    title = prettySlug(path[path.length - 1]);
-  }
-  if (!title) {
-    return npc
-      ? { kind: npc.viewKind || "browsing", title: npc.viewing || "Home" }
-      : { kind: "browsing", title: "Home" };
-  }
-  return {
-    kind: isProduct ? "viewing" : "browsing",
-    title: String(title).slice(0, 64),
-  };
-}
-
-function hoverViewLine(npc) {
-  const kind = npc.viewKind === "viewing" ? "Viewing" : "Browsing";
-  const title = npc.viewing || "Home";
-  return `${kind} ${title}`;
 }
 
 function wrapPixelText(text, scale, maxWidth, maxLines) {
@@ -290,127 +170,6 @@ function wrapPixelText(text, scale, maxWidth, maxLines) {
   return lines.length ? lines : [raw];
 }
 
-function normalizePlace(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
-function isHiddenLocation(loc) {
-  if (!loc) return false;
-  if (normalizePlace(loc.city) !== "council bluffs") return false;
-  const region = normalizePlace(loc.region);
-  const code = String(loc.regionCode || "").toUpperCase();
-  const country = String(loc.country || "").toUpperCase();
-  if (code === "IA" || region === "iowa" || region === "ia") return true;
-  return !code && !region && (country === "US" || !country);
-}
-
-function forgetVisitor(id) {
-  if (!id) return;
-  const had = npcs.delete(id);
-  const waitIdx = waiting.indexOf(id);
-  if (waitIdx >= 0) waiting.splice(waitIdx, 1);
-  pendingCart.delete(id);
-  pendingName.delete(id);
-  pendingItems.delete(id);
-  for (const [key, owner] of [...clientOwner]) {
-    if (owner === id) clientOwner.delete(key);
-  }
-  for (const [sid, owner] of [...sessionAlias]) {
-    if (owner === id || sid === id) sessionAlias.delete(sid);
-  }
-  if (had) {
-    reportCount();
-    admitWaiting();
-  }
-}
-
-function isCheckoutPayload(payload) {
-  if (!payload) return false;
-  if (payload.type === "checkout" || payload.type === "purchase") return true;
-  const url = String(payload.pageUrl || "").toLowerCase();
-  return (
-    url.indexOf("/checkout") >= 0 ||
-    url.indexOf("checkouts") >= 0 ||
-    url.indexOf("thank_you") >= 0
-  );
-}
-
-function keepForCheckout(npc, payload) {
-  if (!npc || !isCheckoutPayload(payload)) return;
-  npc.checkingOut = true;
-  npc.lastEvent = Date.now();
-  if (npc.state === "leaving") {
-    npc.state = hasCart(npc) || npc.hadCart ? "cart" : "idle";
-    npc.leaveT = 0;
-  }
-}
-
-function resolveSession(payload) {
-  let sid = (payload && payload.sessionId) || "anon";
-  if (sessionAlias.has(sid)) sid = sessionAlias.get(sid);
-  const key = payload && payload.clientKey;
-  if (key) {
-    const owner = clientOwner.get(key);
-    if (owner && owner !== sid && (npcs.has(owner) || waiting.indexOf(owner) >= 0)) {
-      sessionAlias.set((payload && payload.sessionId) || sid, owner);
-      return owner;
-    }
-    if (!owner || !npcs.has(owner)) clientOwner.set(key, sid);
-  }
-  return sid;
-}
-
-function locationLabel(npc) {
-  const country = String(npc.country || "").toUpperCase();
-  const city = npc.city || "";
-  const region = npc.regionCode || npc.region || "";
-  if (country === "US") {
-    const bits = [];
-    if (city) bits.push(city);
-    if (region) bits.push(region);
-    if (bits.length) return bits.join(", ");
-  }
-  if (country) {
-    try {
-      return new Intl.DisplayNames(["en"], { type: "region" }).of(country) || country;
-    } catch (err) {
-      return country;
-    }
-  }
-  return "";
-}
-
-function applyVisit(npc, payload) {
-  if (!npc || !payload) return;
-  const info = visitInfo(payload, npc);
-  if (info && info.title) {
-    npc.viewing = info.title;
-    npc.viewKind = info.kind;
-  }
-  if (payload.city) npc.city = payload.city;
-  if (payload.region) npc.region = payload.region;
-  if (payload.regionCode) npc.regionCode = payload.regionCode;
-  if (payload.country) npc.country = payload.country;
-}
-
-function applyName(npc, payload) {
-  if (!npc || !payload) return;
-  let first = cleanNamePart(payload.firstName);
-  let last = cleanNamePart(payload.lastName);
-  if (first && !last) {
-    const parts = first.split(" ").filter(Boolean);
-    if (parts.length >= 2) {
-      first = parts[0];
-      last = parts.slice(1).join(" ");
-    }
-  }
-  if (first) npc.firstName = first;
-  if (last) npc.lastName = last;
-}
-
 function loadProductImage(url) {
   if (!url) return Promise.resolve(null);
   if (imageCache.has(url)) return imageCache.get(url);
@@ -422,130 +181,6 @@ function loadProductImage(url) {
   });
   imageCache.set(url, promise);
   return promise;
-}
-
-function hasCart(npc) {
-  return Boolean(npc && npc.items && npc.items.length);
-}
-
-function applyCartPresence(npc) {
-  if (!npc) return;
-  if (npc.purchased && !hasCart(npc)) {
-    npc.hadCart = false;
-    if (npc.state === "cart") npc.state = "idle";
-    return;
-  }
-  if (hasCart(npc)) {
-    npc.hadCart = true;
-    if (npc.state === "idle") npc.state = "cart";
-  } else {
-    npc.hadCart = false;
-    if (npc.state === "cart") npc.state = "idle";
-  }
-}
-
-function normalizeTitle(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
-function findCartItem(items, payload, loose) {
-  const title = normalizeTitle(payload && payload.productTitle);
-  const image = (payload && (payload.imageDataUrl || payload.imageUrl)) || "";
-  if (title) {
-    let idx = items.findIndex((it) => normalizeTitle(it.title) === title);
-    if (idx >= 0) return idx;
-    if (loose) {
-      idx = items.findIndex((it) => {
-        const name = normalizeTitle(it.title);
-        return name && (name.indexOf(title) >= 0 || title.indexOf(name) >= 0);
-      });
-      if (idx >= 0) return idx;
-    }
-  }
-  if (image) {
-    const idx = items.findIndex(
-      (it) => it.imageUrl === image || it.imageDataUrl === image
-    );
-    if (idx >= 0) return idx;
-  }
-  return -1;
-}
-
-function addCartItem(npc, payload) {
-  if (!npc) return;
-  npc.purchased = false;
-  if (!npc.items) npc.items = [];
-  const title = (payload && payload.productTitle) || "";
-  const imageUrl =
-    (payload && (payload.imageDataUrl || payload.imageUrl)) || "";
-  const productType = (payload && payload.productType) || "";
-  const qty = Math.max(1, Number(payload && payload.quantity) || 1);
-  if (!title && !imageUrl) return;
-  const idx = title ? findCartItem(npc.items, payload, false) : -1;
-  if (idx >= 0) {
-    const existing = npc.items[idx];
-    existing.qty = (existing.qty || 1) + qty;
-    if (imageUrl && !existing.img) {
-      existing.imageUrl = imageUrl;
-      loadProductImage(imageUrl).then((img) => {
-        existing.img = img;
-      });
-    }
-    applyCartPresence(npc);
-    return;
-  }
-  const item = { title, imageUrl, productType, qty, img: null };
-  npc.items.push(item);
-  if (npc.items.length > 8) npc.items.shift();
-  loadProductImage(imageUrl).then((img) => {
-    item.img = img;
-  });
-  applyCartPresence(npc);
-}
-
-function removeCartItem(npc, payload) {
-  if (!npc || !npc.items || !npc.items.length) return;
-  const idx = findCartItem(npc.items, payload, true);
-  if (idx < 0) {
-    applyCartPresence(npc);
-    return;
-  }
-  const item = npc.items[idx];
-  item.qty = (item.qty || 1) - 1;
-  if (item.qty <= 0) npc.items.splice(idx, 1);
-  applyCartPresence(npc);
-}
-
-function replaceCartItems(npc, items) {
-  if (!npc) return;
-  const prev = npc.items || [];
-  npc.items = [];
-  (items || []).forEach((item) => {
-    addCartItem(npc, {
-      productTitle: item.productTitle || item.title,
-      imageUrl: item.imageDataUrl || item.imageUrl,
-      productType: item.productType,
-      quantity: item.quantity || item.qty || 1,
-    });
-  });
-  if (items && items.length && !npc.items.length) npc.items = prev;
-  applyCartPresence(npc);
-}
-
-function applyIncomingCart(npc, payload) {
-  if (!npc || !payload || !Array.isArray(payload.items)) return;
-  if (npc.purchased && payload.type !== "cart") {
-    if (!payload.items.length) {
-      npc.items = [];
-      applyCartPresence(npc);
-    }
-    return;
-  }
-  if (!payload.items.length) return;
-  replaceCartItems(npc, payload.items);
 }
 
 function openDoor() {
@@ -577,419 +212,53 @@ function requestLandmark() {
   if (settings.landmark === "elevator") callElevator();
 }
 
+
+function bootArcade() {
+  arcade = SaleArcade.createStage({
+    now: () => Date.now(),
+    getLandmark: () => settings.landmark,
+    doorX: () => doorX(),
+    elevatorX: () => elevatorX(),
+    slotX: (index) => slotX(index),
+    elevatorReady: () => elevatorReady(),
+    requestLandmark: () => requestLandmark(),
+    onCount: (n) => {
+      if (window.arcade) window.arcade.sendCount(n);
+    },
+    onCartSound: () => ArcadeAudio.cart(),
+    onBoom: () => ArcadeAudio.boom(),
+    onMute: (value) => {
+      muted = value;
+      ArcadeAudio.setMuted(value);
+    },
+    onPurchaseFx: (npc, payload) => {
+      const amount = payload && payload.total ? `$${payload.total}` : "SALE";
+      const title = ((payload && payload.productTitle) || "ORDER").slice(0, 18);
+      caption = { text: `${amount} - ${title}`, t: 0 };
+      const originX = (npc && npc.x) || cssW / 2;
+      const originY = groundY() - 220;
+      rockets = rockets.concat(spawnFireworks(12, originX, originY));
+    },
+    loadImage: (url) => loadProductImage(url),
+  });
+  npcs = arcade.npcs;
+}
+
 function handleEvent(payload) {
-  if (!payload) return;
-  if (payload.type === "mute") {
-    muted = Boolean(payload.muted);
-    ArcadeAudio.setMuted(muted);
-    return;
-  }
-  if (payload.type === "hello") return;
-  if (payload.type === "clear") {
-    npcs.clear();
-    waiting.length = 0;
-    pendingCart.clear();
-    pendingName.clear();
-    pendingItems.clear();
-    clientOwner.clear();
-    sessionAlias.clear();
-    reportCount();
-    return;
-  }
-
-  const id = resolveSession(payload);
-  if (isHiddenLocation(payload)) {
-    forgetVisitor(id);
-    return;
-  }
-  if (payload.type === "enter") {
-    const npc = spawnOrRefresh(id, payload);
-    if (npc && npcs.has(id)) {
-      npc.pendingLeave = 0;
-      keepForCheckout(npc, payload);
-    }
-    return;
-  }
-  if (payload.type === "view" || payload.type === "browse") {
-    const npc = npcs.get(id);
-    if (npc && npcs.has(id)) {
-      npc.lastEvent = Date.now();
-      npc.pendingLeave = 0;
-      applyName(npc, payload);
-      applyVisit(npc, payload);
-      if (isHiddenLocation(npc)) forgetVisitor(id);
-    }
-    return;
-  }
-  if (payload.type === "heartbeat") {
-    const npc = npcs.get(id);
-    if (npc && npc.state !== "leaving") {
-      npc.lastEvent = Date.now();
-      npc.pendingLeave = 0;
-      applyName(npc, payload);
-      applyVisit(npc, payload);
-      applyIncomingCart(npc, payload);
-      keepForCheckout(npc, payload);
-      if (isHiddenLocation(npc)) forgetVisitor(id);
-    }
-    return;
-  }
-  if (payload.type === "checkout") {
-    const npc = npcs.get(id) || spawnOrRefresh(id, payload);
-    if (npc && npcs.has(id)) {
-      applyName(npc, payload);
-      applyVisit(npc, payload);
-      applyIncomingCart(npc, payload);
-      keepForCheckout(npc, payload);
-    }
-    return;
-  }
-  if (payload.type === "cart") {
-    let npc = npcs.get(id);
-    if (!npc) npc = spawnOrRefresh(id, payload);
-    if (!npc) return;
-    if (!npcs.has(id)) {
-      pendingCart.add(id);
-      if (payload.firstName) pendingName.set(id, payload.firstName);
-      const queued = pendingItems.get(id) || [];
-      queued.push(payload);
-      pendingItems.set(id, queued);
-      return;
-    }
-    applyName(npc, payload);
-    applyVisit(npc, payload);
-    npc.pendingLeave = 0;
-    npc.hadCart = true;
-    npc.productTitle = payload.productTitle || npc.productTitle;
-    npc.lastEvent = Date.now();
-    npc.facing = npc.facing || -1;
-    if (payload.productTitle || payload.imageUrl) addCartItem(npc, payload);
-    if (npc.state !== "entering" && npc.state !== "celebrating" && npc.state !== "leaving") {
-      npc.state = "cart";
-    }
-    ArcadeAudio.cart();
-    return;
-  }
-  if (payload.type === "cart_remove") {
-    const npc = npcs.get(id);
-    if (npc) {
-      npc.lastEvent = Date.now();
-      applyVisit(npc, payload);
-      removeCartItem(npc, payload);
-    }
-    return;
-  }
-  if (payload.type === "cart_sync") {
-    let npc = npcs.get(id);
-    if (!npc) npc = spawnOrRefresh(id, payload);
-    if (npc && npcs.has(id)) {
-      npc.lastEvent = Date.now();
-      applyName(npc, payload);
-      applyVisit(npc, payload);
-      if (isHiddenLocation(npc)) {
-        forgetVisitor(id);
-        return;
-      }
-      const incoming = Array.isArray(payload.items) ? payload.items : null;
-      if (!incoming) return;
-      const totalQty = Number(payload.totalQuantity);
-      if (!incoming.length && totalQty !== 0) return;
-      replaceCartItems(npc, incoming);
-    }
-    return;
-  }
-  if (payload.type === "cart_empty") {
-    const npc = npcs.get(id);
-    if (npc) {
-      npc.items = [];
-      applyCartPresence(npc);
-    }
-    return;
-  }
-  if (payload.type === "purchase") {
-    purchase(id, payload);
-  }
-  if (payload.type === "leave") {
-    const npc = npcs.get(id);
-    if (npc && npc.checkingOut) {
-      npc.lastEvent = Date.now();
-      npc.pendingLeave = 0;
-      return;
-    }
-    if (npc && npc.state !== "leaving") npc.pendingLeave = Date.now();
-  }
+  if (!arcade) bootArcade();
+  arcade.handleEvent(payload);
 }
 
-function spawnOrRefresh(id, payload) {
-  if (isHiddenLocation(payload)) {
-    forgetVisitor(id);
-    return null;
-  }
-  const existing = npcs.get(id);
-  if (existing) {
-    existing.lastEvent = Date.now();
-    existing.pendingLeave = 0;
-    applyName(existing, payload);
-    applyVisit(existing, payload);
-    if (isHiddenLocation(existing)) {
-      forgetVisitor(id);
-      return null;
-    }
-    applyIncomingCart(existing, payload);
-    keepForCheckout(existing, payload);
-    if (
-      existing.state === "leaving" &&
-      payload &&
-      (payload.type === "enter" ||
-        payload.type === "cart" ||
-        payload.type === "checkout")
-    ) {
-      existing.state = payload.type === "cart" || existing.hadCart ? "cart" : "idle";
-      existing.leaveT = 0;
-    }
-    return existing;
-  }
-  if (npcs.size >= MAX_NPCS) {
-    if (!waiting.includes(id)) waiting.push(id);
-    if (payload && payload.firstName) pendingName.set(id, payload.firstName);
-    if (payload && Array.isArray(payload.items) && payload.items.length) {
-      const queued = pendingItems.get(id) || [];
-      pendingItems.set(id, queued.concat(payload.items));
-    }
-    return { state: "queued" };
-  }
-  const slot = nextSlot();
-  const npc = {
-    id,
-    slot,
-    state: "entering",
-    x: settings.landmark === "elevator" ? elevatorX() + 18 : doorX() + 10,
-    targetX: slotX(slot),
-    facing: -1,
-    lastEvent: Date.now(),
-    bob: 0,
-    hadCart: false,
-    look: "side",
-    browseT: 0,
-    browseTarget: null,
-    items: [],
-    disembarked: false,
-  };
-  npcs.set(id, npc);
-  applyName(npc, payload);
-  applyVisit(npc, payload);
-  applyIncomingCart(npc, payload);
-  keepForCheckout(npc, payload);
-  if (pendingName.has(id)) {
-    applyName(npc, { firstName: pendingName.get(id) });
-    pendingName.delete(id);
-  }
-  if (pendingCart.has(id)) {
-    npc.hadCart = true;
-    pendingCart.delete(id);
-  }
-  if (pendingItems.has(id)) {
-    pendingItems.get(id).forEach((item) => addCartItem(npc, item));
-    pendingItems.delete(id);
-  }
-  requestLandmark();
-  reportCount();
-  return npc;
+function hoverViewLine(npc) {
+  return SaleArcade.hoverViewLine(npc);
 }
 
-function findPurchaseNpc(id, payload) {
-  if (id && npcs.has(id)) return npcs.get(id);
-  const live = [...npcs.values()].filter((n) => n.state !== "leaving");
-  const checking = live.filter((n) => n.checkingOut);
-  if (checking.length) {
-    return checking.sort((a, b) => b.lastEvent - a.lastEvent)[0];
-  }
-  if (payload && payload.firstName) {
-    const first = cleanNamePart(String(payload.firstName).split(" ")[0]).toLowerCase();
-    const named = live.filter(
-      (n) => n.firstName && n.firstName.toLowerCase() === first
-    );
-    if (named.length) return named.sort((a, b) => b.lastEvent - a.lastEvent)[0];
-  }
-  const carts = live.filter((n) => hasCart(n) || n.state === "cart" || n.hadCart);
-  if (carts.length) return carts.sort((a, b) => b.lastEvent - a.lastEvent)[0];
-  if (live.length === 1) return live[0];
-  return null;
+function locationLabel(npc) {
+  return SaleArcade.locationLabel(npc);
 }
 
-function purchase(id, payload) {
-  let npc = findPurchaseNpc(id, payload);
-  if (!npc) {
-    npc = spawnOrRefresh(id, payload);
-    if (npc && npcs.has(id)) npc.x = slotX(npc.slot);
-  } else if (payload && payload.sessionId && payload.sessionId !== npc.id) {
-    sessionAlias.set(payload.sessionId, npc.id);
-    if (id && id !== npc.id) sessionAlias.set(id, npc.id);
-  }
-  if (npc && npcs.has(npc.id)) {
-    applyName(npc, payload);
-    applyVisit(npc, payload);
-    npc.items = [];
-    npc.hadCart = false;
-    npc.purchased = true;
-    npc.pendingLeave = 0;
-    npc.checkingOut = true;
-    npc.state = "celebrating";
-    npc.celebT = 0;
-    npc.total = payload.total;
-    npc.productTitle = payload.productTitle || npc.productTitle;
-    npc.lastEvent = Date.now();
-    npc.leaveT = 0;
-  }
-  const amount = payload.total ? `$${payload.total}` : "SALE";
-  const title = (payload.productTitle || "ORDER").slice(0, 18);
-  caption = { text: `${amount} - ${title}`, t: 0 };
-  const originX = (npc && npc.x) || cssW / 2;
-  const originY = groundY() - 220;
-  rockets = rockets.concat(spawnFireworks(12, originX, originY));
-  ArcadeAudio.boom();
-}
-
-function admitWaiting() {
-  while (waiting.length && npcs.size < MAX_NPCS) {
-    spawnOrRefresh(waiting.shift());
-  }
-}
-
-function stepNpc(npc, dt) {
-  const moving =
-    npc.state === "entering" ||
-    npc.state === "leaving" ||
-    npc.state === "cart";
-
-  if (npc.state === "entering") {
-    npc.facing = -1;
-    const waitingOnLift =
-      settings.landmark === "elevator" && !npc.disembarked && !elevatorReady();
-    if (waitingOnLift) {
-      npc.x = elevatorX() + 18;
-      requestLandmark();
-    } else {
-      if (settings.landmark === "elevator" && elevatorReady()) {
-        npc.disembarked = true;
-      }
-      npc.x -= WALK_SPEED * dt;
-      if (npc.x <= npc.targetX) {
-        npc.x = npc.targetX;
-        npc.state = npc.hadCart ? "cart" : "idle";
-      }
-    }
-  } else if (npc.state === "idle") {
-    npc.browseT = (npc.browseT || 0) + dt;
-    const t = npc.browseT % 8;
-    const left = stageLeft();
-    const right = stageRight();
-    npc.x = Math.min(right, Math.max(left, npc.x));
-    if (t < 1.8) {
-      npc.look = "up";
-      npc.bob = 0;
-    } else if (t < 2.7) {
-      npc.look = "side";
-      npc.facing = -1;
-      npc.bob = 0;
-    } else if (t < 3.6) {
-      npc.look = "side";
-      npc.facing = 1;
-      npc.bob = 0;
-    } else {
-      npc.look = "side";
-      if (npc.browseTarget == null) {
-        npc.browseTarget = left + Math.random() * Math.max(8, right - left);
-      }
-      const gap = npc.browseTarget - npc.x;
-      if (Math.abs(gap) > 3) {
-        npc.facing = Math.sign(gap);
-        npc.x += npc.facing * 38 * dt;
-        npc.bob = Math.abs(Math.sin(performance.now() / 90)) * 4;
-      } else {
-        npc.browseTarget = null;
-        npc.bob = 0;
-      }
-    }
-  } else if (npc.state === "cart") {
-    npc.hadCart = true;
-    const left = stageLeft();
-    const right = stageRight();
-    npc.x += npc.facing * 70 * dt;
-    if (npc.x < left) {
-      npc.x = left;
-      npc.facing = 1;
-    }
-    if (npc.x > right) {
-      npc.x = right;
-      npc.facing = -1;
-    }
-  } else if (npc.state === "celebrating") {
-    npc.celebT += dt;
-    if (npc.celebT > 2.6) {
-      npc.state = "idle";
-      npc.look = "up";
-    }
-  } else if (npc.state === "leaving") {
-    npc.facing = 1;
-    npc.leaveT = (npc.leaveT || 0) + dt;
-    if (settings.landmark === "elevator") {
-      const cabin = elevatorX() + 10;
-      if (npc.x > cabin - 28) requestLandmark();
-      if (!elevatorReady() && npc.x >= cabin - 12) {
-        npc.x = cabin - 12;
-      } else {
-        npc.x += WALK_SPEED * dt;
-      }
-      if (elevatorReady() && npc.x >= cabin + 16) {
-        npcs.delete(npc.id);
-        reportCount();
-        admitWaiting();
-        return;
-      }
-    } else {
-      npc.x += WALK_SPEED * dt;
-      if (npc.x > doorX() - 20) requestLandmark();
-      if (npc.x >= doorX() + 4) {
-        npcs.delete(npc.id);
-        reportCount();
-        admitWaiting();
-        return;
-      }
-    }
-    if (npc.leaveT > 10) {
-      npcs.delete(npc.id);
-      reportCount();
-      admitWaiting();
-      return;
-    }
-  }
-
-  if (
-    npc.pendingLeave &&
-    Date.now() - npc.pendingLeave > LEAVE_GRACE_MS &&
-    npc.state !== "leaving" &&
-    !npc.checkingOut
-  ) {
-    npc.state = "leaving";
-    npc.leaveT = 0;
-    npc.pendingLeave = 0;
-    npc.targetX = doorX() + 8;
-  }
-
-  const idleMs = npc.checkingOut ? CHECKOUT_IDLE_MS : IDLE_MS;
-  if (Date.now() - npc.lastEvent > idleMs && npc.state !== "leaving") {
-    npc.state = "leaving";
-    npc.leaveT = 0;
-    npc.checkingOut = false;
-    npc.targetX = doorX() + 8;
-  }
-
-  if (npc.state !== "idle") {
-    npc.look = "side";
-    npc.browseTarget = null;
-    npc.bob = moving ? Math.abs(Math.sin(performance.now() / 90)) * 4 : 0;
-  }
+function hasCart(npc) {
+  return SaleArcade.hasCart(npc);
 }
 
 function stepElevator(dt) {
@@ -1484,7 +753,7 @@ function startLoop() {
     last = now;
     stepDoor(dt);
     stepElevator(dt);
-    for (const npc of [...npcs.values()]) stepNpc(npc, dt);
+    if (arcade) arcade.step(dt);
     rockets = stepFireworks(rockets);
 
     ctx.clearRect(0, 0, cssW, cssH);
@@ -1511,6 +780,8 @@ loadAllSprites()
   .catch((err) => {
     console.error("sprite load failed", err);
   });
+
+bootArcade();
 
 if (window.arcade) {
   window.arcade.onEvent(handleEvent);
