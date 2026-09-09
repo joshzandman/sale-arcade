@@ -114,8 +114,6 @@ export const BEACON_JS = `(function () {
   var heartbeatTimer = null;
   function pageIsLive() {
     if (document.prerendering) return false;
-    if (document.visibilityState && document.visibilityState !== "visible") return false;
-    if (typeof document.hasFocus === "function" && !document.hasFocus()) return false;
     return true;
   }
   function startPresence() {
