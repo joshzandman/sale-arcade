@@ -1,8 +1,6 @@
 {% comment %}
-  Prefer Theme editor → Add section → Custom liquid in the footer.
-  That setting usually survives a Taiga update. Editing theme.liquid does not.
-
-  Installed on the live Taiga theme as snippets/sale-arcade-member.liquid
+  Put this in Theme editor → footer → Custom liquid (survives most Taiga updates).
+  Inline so browsers that block workers.dev scripts still send visits.
 {% endcomment %}
 {% if customer %}
   {% assign arcade_name = customer.name | strip %}
@@ -15,4 +13,127 @@
     </script>
   {% endif %}
 {% endif %}
-<script src="https://sale-arcade.joshzandman.workers.dev/beacon.js"></script>
+<script>
+(function () {
+  if (window.__saleArcadeBeacon) return;
+  window.__saleArcadeBeacon = true;
+  var ENDPOINT = "https://sale-arcade.joshzandman.workers.dev/event";
+  function uuid() {
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
+      var r = (Math.random() * 16) | 0;
+      var v = c === "x" ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+  }
+  function readCookie(name) {
+    var parts = document.cookie.split("; ");
+    for (var i = 0; i < parts.length; i += 1) {
+      if (parts[i].indexOf(name + "=") === 0) {
+        return decodeURIComponent(parts[i].slice(name.length + 1).replace(/\+/g, " "));
+      }
+    }
+    return "";
+  }
+  function sid() {
+    var id = readCookie("sale_arcade_sid");
+    if (id) return id;
+    id = uuid();
+    document.cookie = "sale_arcade_sid=" + id + "; path=/; max-age=2592000; SameSite=Lax";
+    return id;
+  }
+  function post(type, extra) {
+    var body = {
+      sessionId: sid(),
+      type: type,
+      pageUrl: location.href,
+      pageTitle: document.title
+    };
+    var name = readCookie("sale_arcade_name");
+    if (name) body.firstName = name.slice(0, 40);
+    if (extra) {
+      for (var key in extra) {
+        if (Object.prototype.hasOwnProperty.call(extra, key) && extra[key] != null) {
+          body[key] = extra[key];
+        }
+      }
+    }
+    fetch(ENDPOINT, {
+      method: "POST",
+      body: JSON.stringify(body),
+      keepalive: true
+    }).catch(function () {});
+  }
+  function cartItems(cart) {
+    var items = [];
+    var lines = (cart && cart.items) || [];
+    for (var i = 0; i < lines.length && items.length < 8; i += 1) {
+      var line = lines[i];
+      if (!line) continue;
+      var image = line.image || "";
+      if (image.indexOf("//") === 0) image = "https:" + image;
+      items.push({
+        productTitle: line.product_title || line.title || "",
+        productType: line.product_type || "",
+        imageUrl: image,
+        quantity: line.quantity || 1
+      });
+    }
+    return {
+      items: items,
+      totalQuantity: cart && typeof cart.item_count === "number" ? cart.item_count : items.length
+    };
+  }
+  function sendEnter() {
+    fetch("/cart.js", { credentials: "same-origin" })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (cart) {
+        post("enter", cart ? cartItems(cart) : {});
+      })
+      .catch(function () {
+        post("enter");
+      });
+  }
+  var stayingOnSite = false;
+  function marksCheckout(el) {
+    if (!el || !el.getAttribute) return false;
+    var blob = [
+      el.getAttribute("href") || "",
+      el.getAttribute("action") || "",
+      el.getAttribute("name") || "",
+      el.id || "",
+      el.className || ""
+    ].join(" ").toLowerCase();
+    return blob.indexOf("checkout") >= 0 || blob.indexOf("shop-pay") >= 0;
+  }
+  function sameSiteLink(el) {
+    if (!el || el.tagName !== "A") return false;
+    var href = el.getAttribute("href") || "";
+    if (!href || href.indexOf("#") === 0 || href.indexOf("javascript:") === 0) return false;
+    try {
+      var next = new URL(href, location.href);
+      return next.origin === location.origin;
+    } catch (err) {
+      return href.indexOf("/") === 0 || href.indexOf("?") === 0;
+    }
+  }
+  document.addEventListener("click", function (event) {
+    var el = event.target;
+    while (el && el !== document) {
+      if (marksCheckout(el) || sameSiteLink(el)) {
+        stayingOnSite = true;
+        break;
+      }
+      el = el.parentNode;
+    }
+  }, true);
+  sid();
+  sendEnter();
+  setInterval(function () {
+    post("heartbeat");
+  }, 10000);
+  window.addEventListener("pagehide", function () {
+    if (stayingOnSite) return;
+    post("leave");
+  });
+})();
+</script>

@@ -158,8 +158,7 @@ export class ArcadeRoom {
         return cors(JSON.stringify({ error: "need type and sessionId" }), 400);
       }
       const authed = this.env.SHARED_SECRET && secret === this.env.SHARED_SECRET;
-      const presence =
-        fromStorefront(request) && PRESENCE_TYPES[String(body.type)];
+      const presence = PRESENCE_TYPES[String(body.type)];
       if (!authed && !presence) {
         return cors(JSON.stringify({ error: "unauthorized" }), 401);
       }
