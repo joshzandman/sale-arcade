@@ -211,6 +211,14 @@ function visitInfo(payload, npc) {
     title = "Home";
   } else if (path[0] === "collections" && path[1]) {
     title = prettySlug(path[1]);
+  } else if (path[0] === "pages") {
+    title = payload.pageTitle
+      ? cleanPageTitle(payload.pageTitle)
+      : prettySlug(path[1] || path[path.length - 1]);
+    title = String(title)
+      .replace(/\s+instructions$/i, "")
+      .trim();
+    title = title ? `${title} instructions` : "instructions";
   } else if (path[0] === "cart") {
     title = "Cart";
   } else if (payload.pageTitle) {
