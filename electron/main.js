@@ -14,7 +14,7 @@ const fs = require("fs");
 const { WebSocket } = require("ws");
 const { startOrderPoll } = require("./orders");
 const hidKeys = require("./hid-keys");
-const { LANDMARKS } = require("./renderer/logic");
+const { LANDMARKS, NPC_SIZES } = require("./renderer/logic");
 
 const ROOT = app.isPackaged
   ? process.resourcesPath
@@ -35,9 +35,10 @@ let connected = false;
 let landmark = "door";
 let storeName = "Zandman's Magic Shop";
 let showStage = true;
+let npcSize = "normal";
 let promptWin = null;
 let tipsHeld = false;
-let tipsPinned = false;
+let tipsPinned = true;
 let tipsWatch = null;
 
 function loadEnv() {
@@ -221,7 +222,12 @@ function requestCount() {
 
 function sendSettings() {
   if (!overlay || overlay.isDestroyed()) return;
-  overlay.webContents.send("arcade-settings", { landmark, storeName, showStage });
+  overlay.webContents.send("arcade-settings", {
+    landmark,
+    storeName,
+    showStage,
+    npcSize,
+  });
 }
 
 function setLandmark(value) {
@@ -234,6 +240,13 @@ function setLandmark(value) {
 function setShowStage(value) {
   showStage = Boolean(value);
   saveState({ showStage });
+  sendSettings();
+  rebuildMenu();
+}
+
+function setNpcSize(value) {
+  npcSize = NPC_SIZES[value] ? value : "normal";
+  saveState({ npcSize });
   sendSettings();
   rebuildMenu();
 }
@@ -336,6 +349,15 @@ function rebuildMenu() {
       ],
     },
     {
+      label: "NPC size",
+      submenu: ["large", "normal", "small", "tiny"].map((size) => ({
+        label: size.charAt(0).toUpperCase() + size.slice(1),
+        type: "radio",
+        checked: npcSize === size,
+        click: () => setNpcSize(size),
+      })),
+    },
+    {
       label: "Show stage graphic",
       type: "checkbox",
       checked: showStage,
@@ -350,9 +372,9 @@ function rebuildMenu() {
       click: () => sendEvent({ type: "clear" }),
     },
     {
-      label: tipsPinned
-        ? "Hide all visitor info"
-        : "Show all visitor info (hold ⌥` or ⌃⇧A)",
+      label: tipsPinned ? "Hide chat bubbles" : "Show chat bubbles",
+      type: "checkbox",
+      checked: tipsPinned,
       click: () => togglePinnedTips(),
     },
     { type: "separator" },
@@ -621,6 +643,7 @@ function tipsVisible() {
 
 function togglePinnedTips() {
   tipsPinned = !tipsPinned;
+  saveState({ tipsPinned });
   sendTips(tipsVisible());
   rebuildMenu();
 }
@@ -665,6 +688,8 @@ app.whenReady().then(() => {
   }
   if (saved.storeName) storeName = String(saved.storeName).slice(0, 40);
   if (typeof saved.showStage === "boolean") showStage = saved.showStage;
+  if (NPC_SIZES[saved.npcSize]) npcSize = saved.npcSize;
+  if (typeof saved.tipsPinned === "boolean") tipsPinned = saved.tipsPinned;
   app.setName("Sale Arcade");
   if (process.platform === "darwin") app.dock.hide();
 

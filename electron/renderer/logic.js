@@ -4,7 +4,17 @@
   const CHECKOUT_IDLE_MS = 20 * 60 * 1000;
   const LEAVE_GRACE_MS = 3000;
   const WALK_SPEED = 130;
+  const STROLL_SPEED = 48;
+  const CART_STROLL_SPEED = 70;
+  const DWELL_S = 10;
   const LANDMARKS = ["none", "door", "street", "elevator"];
+  const NPC_SIZES = {
+    large: 180,
+    normal: 140,
+    small: 100,
+    tiny: 72,
+  };
+  const OUTFIT_COUNT = 6;
   const PRESENCE_TYPES = { enter: true, heartbeat: true, leave: true };
   const SPECULATIVE_SKIP = {
     enter: true,
@@ -115,10 +125,68 @@
     };
   }
 
+  function visitorName(npc) {
+    const first = npc && npc.firstName ? String(npc.firstName).trim() : "";
+    const last = npc && npc.lastName ? String(npc.lastName).trim() : "";
+    if (first && last) return `${first} ${last}`;
+    if (first) return first;
+    return "Guest";
+  }
+
   function hoverViewLine(npc) {
-    const kind = npc && npc.viewKind === "viewing" ? "Viewing" : "Browsing";
+    const verb = npc && npc.viewKind === "viewing" ? "viewing" : "browsing";
     const title = (npc && npc.viewing) || "Home";
-    return `${kind} ${title}`;
+    return `${visitorName(npc)} is ${verb} ${title}`;
+  }
+
+  function npcHeightFor(size) {
+    return NPC_SIZES[size] || NPC_SIZES.normal;
+  }
+
+  function minNpcGap(height) {
+    return Math.round((Number(height) || NPC_SIZES.normal) * 0.7) + 24;
+  }
+
+  function hashOutfit(id) {
+    let h = 0;
+    const s = String(id || "");
+    for (let i = 0; i < s.length; i += 1) {
+      h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    }
+    return h % OUTFIT_COUNT;
+  }
+
+  function pickOutfit(id, used) {
+    const preferred = hashOutfit(id);
+    const taken = used instanceof Set ? used : new Set(used || []);
+    if (!taken.has(preferred)) return preferred;
+    for (let i = 0; i < OUTFIT_COUNT; i += 1) {
+      const next = (preferred + i) % OUTFIT_COUNT;
+      if (!taken.has(next)) return next;
+    }
+    return preferred;
+  }
+
+  function separateNpcs(list, minGap) {
+    const gap = Math.max(8, Number(minGap) || 80);
+    const npcs = (list || []).filter(Boolean).sort((a, b) => a.x - b.x);
+    for (let i = 0; i < npcs.length - 1; i += 1) {
+      const a = npcs[i];
+      const b = npcs[i + 1];
+      const overlap = gap - (b.x - a.x);
+      if (overlap <= 0) continue;
+      const aLeaving = a.state === "leaving";
+      const bLeaving = b.state === "leaving";
+      if (aLeaving && !bLeaving) {
+        b.x += overlap;
+      } else if (bLeaving && !aLeaving) {
+        a.x -= overlap;
+      } else {
+        a.x -= overlap / 2;
+        b.x += overlap / 2;
+      }
+    }
+    return npcs;
   }
 
   function normalizePlace(value) {
@@ -420,6 +488,9 @@
     const onMute = hooks.onMute || (() => {});
     const onPurchaseFx = hooks.onPurchaseFx || (() => {});
     const getLandmark = hooks.getLandmark || (() => settings.landmark);
+    const getBodyWidth = hooks.getBodyWidth || (() => minNpcGap(npcHeightFor(settings.npcSize)));
+    const stageLeft = hooks.stageLeft || (() => 40);
+    const stageRight = hooks.stageRight || (() => 800);
 
     const npcs = new Map();
     const waiting = [];
@@ -432,6 +503,7 @@
       landmark: "door",
       storeName: "Zandman's Magic Shop",
       showStage: true,
+      npcSize: "normal",
     };
 
     function nextSlot() {
@@ -529,9 +601,13 @@
         return { state: "queued" };
       }
       const slot = nextSlot();
+      const usedOutfits = new Set(
+        [...npcs.values()].map((n) => n.outfit).filter((n) => n != null)
+      );
       const npc = {
         id,
         slot,
+        outfit: pickOutfit(id, usedOutfits),
         state: "entering",
         x: getLandmark() === "elevator" ? elevatorX() + 18 : doorX() + 10,
         targetX: slotX(slot),
@@ -542,6 +618,9 @@
         look: "side",
         browseT: 0,
         browseTarget: null,
+        idleMode: "dwell",
+        dwellT: Math.random() * 2,
+        dwellFor: DWELL_S + Math.random() * 2,
         items: [],
         disembarked: false,
       };
@@ -771,17 +850,41 @@
           if (getLandmark() === "elevator" && elevatorReady()) {
             npc.disembarked = true;
           }
-          npc.x -= WALK_SPEED * dt;
+          const nextX = npc.x - WALK_SPEED * dt;
+          let blocked = false;
+          const gap = getBodyWidth();
+          for (const other of npcs.values()) {
+            if (other === npc) continue;
+            if (other.x < npc.x && npc.x - other.x < gap) {
+              blocked = true;
+              break;
+            }
+          }
+          if (!blocked) {
+            npc.x = nextX;
+            npc.bob = Math.abs(Math.sin(now() / 90)) * 4;
+          }
           if (npc.x <= npc.targetX) {
             npc.x = npc.targetX;
             npc.state = npc.hadCart ? "cart" : "idle";
+            npc.idleMode = "dwell";
+            npc.dwellT = 0;
+            npc.dwellFor = DWELL_S + Math.random() * 2;
+            npc.look = "up";
+            npc.bob = 0;
           }
         }
+      } else if (npc.state === "idle" || npc.state === "cart") {
+        stepRoam(npc, dt, npc.state === "cart" ? CART_STROLL_SPEED : STROLL_SPEED);
       } else if (npc.state === "celebrating") {
         npc.celebT = (npc.celebT || 0) + dt;
         if (npc.celebT > 2.6) {
           npc.state = "idle";
           npc.look = "up";
+          npc.idleMode = "dwell";
+          npc.dwellT = 0;
+          npc.dwellFor = DWELL_S + Math.random() * 2;
+          npc.bob = 0;
         }
       } else if (npc.state === "leaving") {
         npc.facing = 1;
@@ -837,10 +940,102 @@
         npc.checkingOut = false;
         npc.targetX = doorX() + 8;
       }
+
+      if (npc.state === "entering" || npc.state === "leaving") {
+        npc.look = "side";
+        npc.browseTarget = null;
+        npc.idleMode = null;
+        if (npc.state === "leaving") {
+          npc.bob = Math.abs(Math.sin(now() / 90)) * 4;
+        }
+      }
+    }
+
+    function pickWalkTarget(npc) {
+      const left = stageLeft();
+      const right = stageRight();
+      const span = Math.max(8, right - left);
+      const gap = getBodyWidth();
+      const others = [...npcs.values()]
+        .filter((other) => other !== npc)
+        .map((other) => other.x);
+      for (let i = 0; i < 8; i += 1) {
+        const x = left + Math.random() * span;
+        if (others.every((ox) => Math.abs(ox - x) >= gap * 0.75)) return x;
+      }
+      return left + Math.random() * span;
+    }
+
+    function stepRoam(npc, dt, walkSpeed) {
+      const left = stageLeft();
+      const right = stageRight();
+      npc.x = Math.min(right, Math.max(left, npc.x));
+      const dwellFor = npc.dwellFor || DWELL_S;
+      if (npc.idleMode !== "walk") {
+        npc.idleMode = "dwell";
+        npc.dwellT = (npc.dwellT || 0) + dt;
+        const t = npc.dwellT % dwellFor;
+        if (npc.state === "idle") {
+          if (t < dwellFor * 0.25 || t >= dwellFor * 0.75) npc.look = "up";
+          else {
+            npc.look = "side";
+            npc.facing = t < dwellFor * 0.5 ? -1 : 1;
+          }
+        } else {
+          npc.look = "side";
+        }
+        npc.bob = 0;
+        if (npc.dwellT >= dwellFor) {
+          npc.idleMode = "walk";
+          npc.dwellT = 0;
+          npc.look = "side";
+          npc.browseTarget = pickWalkTarget(npc);
+        }
+        return;
+      }
+      npc.look = "side";
+      if (npc.browseTarget == null) npc.browseTarget = pickWalkTarget(npc);
+      const gap = npc.browseTarget - npc.x;
+      if (Math.abs(gap) > 4) {
+        const dir = Math.sign(gap);
+        const nextX = npc.x + dir * walkSpeed * dt;
+        let blocked = false;
+        const body = getBodyWidth();
+        for (const other of npcs.values()) {
+          if (other === npc) continue;
+          if (dir < 0 && other.x < npc.x && npc.x - other.x < body) blocked = true;
+          if (dir > 0 && other.x > npc.x && other.x - npc.x < body) blocked = true;
+        }
+        if (!blocked) {
+          npc.facing = dir;
+          npc.x = nextX;
+          npc.bob = Math.abs(Math.sin(now() / 90)) * 4;
+        } else {
+          npc.idleMode = "dwell";
+          npc.dwellT = 0;
+          npc.dwellFor = DWELL_S + Math.random() * 2;
+          npc.browseTarget = null;
+          npc.bob = 0;
+        }
+      } else {
+        npc.x = npc.browseTarget;
+        npc.browseTarget = null;
+        npc.idleMode = "dwell";
+        npc.dwellT = 0;
+        npc.dwellFor = DWELL_S + Math.random() * 2;
+        npc.bob = 0;
+      }
     }
 
     function step(dt) {
       for (const npc of [...npcs.values()]) stepNpc(npc, dt);
+      separateNpcs([...npcs.values()], getBodyWidth());
+      const left = stageLeft();
+      const right = stageRight();
+      for (const npc of npcs.values()) {
+        if (npc.state === "entering" || npc.state === "leaving") continue;
+        npc.x = Math.min(right, Math.max(left, npc.x));
+      }
     }
 
     function applySettings(data) {
@@ -848,6 +1043,7 @@
       if (LANDMARKS.indexOf(data.landmark) >= 0) settings.landmark = data.landmark;
       if (data.storeName) settings.storeName = String(data.storeName).slice(0, 40);
       if (typeof data.showStage === "boolean") settings.showStage = data.showStage;
+      if (NPC_SIZES[data.npcSize]) settings.npcSize = data.npcSize;
     }
 
     return {
@@ -867,7 +1063,10 @@
     IDLE_MS,
     CHECKOUT_IDLE_MS,
     LEAVE_GRACE_MS,
+    DWELL_S,
     LANDMARKS,
+    NPC_SIZES,
+    OUTFIT_COUNT,
     PRESENCE_TYPES,
     cleanNamePart,
     urlPath,
@@ -878,6 +1077,12 @@
     cartishType,
     visitInfo,
     hoverViewLine,
+    visitorName,
+    npcHeightFor,
+    minNpcGap,
+    hashOutfit,
+    pickOutfit,
+    separateNpcs,
     normalizePlace,
     isHiddenLocation,
     isCheckoutPayload,

@@ -16,7 +16,19 @@ describe("visitInfo labels", () => {
     });
     assert.equal(info.kind, "viewing");
     assert.equal(info.title, "1984");
-    assert.equal(hoverViewLine({ viewKind: info.kind, viewing: info.title }), "Viewing 1984");
+    assert.equal(
+      hoverViewLine({ viewKind: info.kind, viewing: info.title }),
+      "Guest is viewing 1984"
+    );
+    assert.equal(
+      hoverViewLine({
+        viewKind: info.kind,
+        viewing: info.title,
+        firstName: "Josh",
+        lastName: "Zandman",
+      }),
+      "Josh Zandman is viewing 1984"
+    );
   });
 
   it("does not treat cart events as product views", () => {

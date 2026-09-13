@@ -1,5 +1,5 @@
 const MAX_NPCS = SaleArcade.MAX_NPCS;
-const NPC_H = 140;
+const NPC_H = SaleArcade.NPC_SIZES.normal;
 const DOOR_H = 196;
 const ELEVATOR_W = 92;
 const ELEVATOR_H = 152;
@@ -11,7 +11,7 @@ let cssH = window.innerHeight;
 let stage = { left: 0, top: 0, width: cssW, height: cssH };
 
 const imageCache = new Map();
-let arcade = null;
+let world = null;
 let npcs = new Map();
 let sprites = null;
 let rockets = [];
@@ -21,11 +21,12 @@ let doorHold = 0;
 let elevator = { phase: "hidden", rise: 0, doors: 0, hold: 0 };
 let last = performance.now();
 let muted = false;
-let showAllTips = false;
+let showAllTips = true;
 let settings = {
   landmark: "door",
   storeName: "Zandman's Magic Shop",
   showStage: true,
+  npcSize: "normal",
 };
 
 function resize() {
@@ -68,6 +69,14 @@ function applySettings(data) {
   if (typeof data.showStage === "boolean") {
     settings.showStage = data.showStage;
   }
+  if (SaleArcade.NPC_SIZES[data.npcSize]) {
+    settings.npcSize = data.npcSize;
+  }
+  if (world) world.applySettings(settings);
+}
+
+function npcHeight() {
+  return SaleArcade.npcHeightFor(settings.npcSize);
 }
 
 function splitSignLines(name) {
@@ -85,7 +94,7 @@ function splitSignLines(name) {
 }
 
 function groundY() {
-  return stage.top + stage.height - 22;
+  return stage.top + stage.height - 13;
 }
 
 function doorWidth() {
@@ -134,7 +143,10 @@ function slotX(index) {
   const left = stageLeft();
   const right = stageRight();
   const span = Math.max(120, right - left);
-  return left + ((index + 0.5) * span) / MAX_NPCS;
+  const gap = SaleArcade.minNpcGap(npcHeight());
+  const step = Math.max(gap, span / MAX_NPCS);
+  const x = left + (index + 0.5) * step;
+  return Math.min(right - 8, x);
 }
 
 function reportCount() {
@@ -214,7 +226,7 @@ function requestLandmark() {
 
 
 function bootArcade() {
-  arcade = SaleArcade.createStage({
+  world = SaleArcade.createStage({
     now: () => Date.now(),
     getLandmark: () => settings.landmark,
     doorX: () => doorX(),
@@ -222,6 +234,9 @@ function bootArcade() {
     slotX: (index) => slotX(index),
     elevatorReady: () => elevatorReady(),
     requestLandmark: () => requestLandmark(),
+    getBodyWidth: () => SaleArcade.minNpcGap(npcHeight()),
+    stageLeft: () => stageLeft(),
+    stageRight: () => stageRight(),
     onCount: (n) => {
       if (window.arcade) window.arcade.sendCount(n);
     },
@@ -241,12 +256,12 @@ function bootArcade() {
     },
     loadImage: (url) => loadProductImage(url),
   });
-  npcs = arcade.npcs;
+  npcs = world.npcs;
 }
 
 function handleEvent(payload) {
-  if (!arcade) bootArcade();
-  arcade.handleEvent(payload);
+  if (!world) bootArcade();
+  world.handleEvent(payload);
 }
 
 function hoverViewLine(npc) {
@@ -319,21 +334,18 @@ function stepDoor(dt) {
 
 function drawSidewalk() {
   if (!settings.showStage) return;
-  const y = groundY() - 4;
   const brickW = 32;
-  const brickH = 13;
+  const y = groundY();
+  const h = Math.max(1, stage.top + stage.height - y);
   const x0 = stage.left;
   const w = stage.width;
   ctx.fillStyle = "rgba(8,6,12,0.45)";
-  ctx.fillRect(x0, y - 8, w, 34);
-  for (let row = 0; row < 2; row += 1) {
-    const off = (row % 2) * (brickW / 2);
-    for (let x = x0 - brickW; x < x0 + w + brickW; x += brickW) {
-      ctx.fillStyle = row === 0 ? "#7a757c" : "#4e4a52";
-      ctx.fillRect(Math.round(x + off), y + row * brickH, brickW - 2, brickH - 2);
-      ctx.fillStyle = "#9a959c";
-      ctx.fillRect(Math.round(x + off), y + row * brickH, brickW - 2, 2);
-    }
+  ctx.fillRect(x0, y, w, h);
+  for (let x = x0 - brickW; x < x0 + w + brickW; x += brickW) {
+    ctx.fillStyle = "#4e4a52";
+    ctx.fillRect(Math.round(x), y, brickW - 2, h);
+    ctx.fillStyle = "#9a959c";
+    ctx.fillRect(Math.round(x), y, brickW - 2, 2);
   }
 }
 
@@ -515,66 +527,17 @@ function drawDoor() {
 }
 
 function spriteFor(npc) {
-  if (npc.state === "celebrating") return sprites.celebrate;
-  if (hasCart(npc) || npc.state === "cart") return sprites.cart;
-  if (npc.state === "idle" && npc.look === "up" && sprites.look) return sprites.look;
-  return sprites.idle;
-}
-
-function nameBubbleLines(npc) {
-  const scale = 1;
-  const maxW = 16 * 6 * scale;
-  const first = npc.firstName || "";
-  const last = npc.lastName || "";
-  const full = last ? `${first} ${last}` : first;
-  if (measurePixelText(full, scale) <= maxW) return [full];
-  if (
-    last &&
-    measurePixelText(first, scale) <= maxW &&
-    measurePixelText(last, scale) <= maxW
-  ) {
-    return [first, last];
+  const outfit = Number.isInteger(npc.outfit) ? npc.outfit : 0;
+  if (npc.state === "celebrating") {
+    return sprites[`celebrate-${outfit}`] || sprites.celebrate;
   }
-  return wrapPixelText(full, scale, maxW, 2);
-}
-
-function drawBubble(npc, x, y, width) {
-  if (!npc.firstName) return;
-  const scale = 1;
-  const lines = nameBubbleLines(npc);
-  const padX = 6;
-  const padY = 4;
-  const gap = 3;
-  const widths = lines.map((line) => measurePixelText(line, scale));
-  const tw = Math.max.apply(null, widths.concat([0]));
-  const bw = tw + padX * 2;
-  const bh = lines.length * (7 * scale) + (lines.length - 1) * gap + padY * 2;
-  let bx = Math.round(x + width / 2 - bw / 2);
-  let by = Math.round(y - bh - 14);
-  bx = Math.max(stage.left + 4, Math.min(bx, stage.left + stage.width - bw - 4));
-  by = Math.max(stage.top + 4, by);
-  ctx.fillStyle = "#1a1020";
-  ctx.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
-  ctx.fillStyle = "#fff8e8";
-  ctx.fillRect(bx, by, bw, bh);
-  const tailX = Math.round(Math.min(Math.max(x + width / 2, bx + 8), bx + bw - 8));
-  ctx.fillStyle = "#1a1020";
-  ctx.fillRect(tailX - 4, by + bh, 8, 6);
-  ctx.fillStyle = "#fff8e8";
-  ctx.fillRect(tailX - 3, by + bh - 1, 6, 6);
-  ctx.fillRect(tailX - 2, by + bh + 5, 4, 4);
-  let ty = by + padY;
-  lines.forEach((line, i) => {
-    drawPixelText(
-      ctx,
-      line,
-      bx + Math.round((bw - widths[i]) / 2),
-      ty,
-      scale,
-      "#2a1810"
-    );
-    ty += 7 * scale + gap;
-  });
+  if (hasCart(npc) || npc.state === "cart") {
+    return sprites[`cart-${outfit}`] || sprites.cart;
+  }
+  if (npc.state === "idle" && npc.look === "up") {
+    return sprites[`look-${outfit}`] || sprites.look;
+  }
+  return sprites[`idle-${outfit}`] || sprites.idle;
 }
 
 function drawCartItems(npc, x, y, width, height, flip) {
@@ -584,8 +547,9 @@ function drawCartItems(npc, x, y, width, height, flip) {
   shown.forEach((item, i) => {
     const kind = `${item.productType || ""} ${item.title || ""}`.toLowerCase();
     const isBook = /book|novel|isbn|paperback|hardcover|fiction/.test(kind);
-    const iw = isBook ? 22 : 26;
-    const ih = isBook ? 32 : 26;
+    const scale = npcHeight() / NPC_H;
+    const iw = (isBook ? 22 : 26) * scale;
+    const ih = (isBook ? 32 : 26) * scale;
     const localX = width * 0.62 + i * 8;
     const localY = height * 0.34 - (i % 2) * 5;
     const screenX = flip ? x + width - localX - iw : x + localX;
@@ -637,7 +601,7 @@ function drawNpc(npc) {
   if (!npcVisible(npc)) return;
   const spr = spriteFor(npc);
   const hop = npc.state === "celebrating" ? Math.abs(Math.sin(npc.celebT * 8)) * 14 : 0;
-  const h = NPC_H;
+  const h = npcHeight();
   const width = (spr.sw / spr.sh) * h;
   const x = npc.x;
   const y = groundY() - h - npc.bob - hop;
@@ -646,13 +610,11 @@ function drawNpc(npc) {
   if (hasCart(npc) && npc.state !== "celebrating") {
     drawCartItems(npc, x, y, width, h, flip);
   }
-  drawBubble(npc, x, y, width);
   npc.bounds = { x, y, w: width, h };
   return width;
 }
 
 function hoverCardLines(npc) {
-  const items = npc.items || [];
   const scale = 1;
   const maxW = 26 * 6 * scale;
   const lines = wrapPixelText(hoverViewLine(npc), scale, maxW, 3).map((text) => ({
@@ -672,18 +634,6 @@ function hoverCardLines(npc) {
       });
     });
   }
-  items.slice(0, 6).forEach((item) => {
-    let label = item.title || "Item";
-    if ((item.qty || 1) > 1) label = `${label} x${item.qty}`;
-    wrapPixelText(label, scale, maxW, 2).forEach((text) => {
-      lines.push({
-        text,
-        color: "#ffe0a0",
-        scale,
-        align: "left",
-      });
-    });
-  });
   return lines;
 }
 
@@ -701,10 +651,9 @@ function drawHoverCard(npc) {
     if (i < lines.length - 1) contentH += gap;
   });
   const bh = contentH + padY * 2;
-  const b = npc.bounds || { x: npc.x, y: groundY() - NPC_H, w: 80 };
-  const nameLift = npc.firstName ? 58 : 0;
+  const b = npc.bounds || { x: npc.x, y: groundY() - npcHeight(), w: 80 };
   let bx = Math.round(b.x + b.w / 2 - bw / 2);
-  let by = Math.round((b.y || groundY() - NPC_H) - bh - 10 - nameLift);
+  let by = Math.round((b.y || groundY() - npcHeight()) - bh - 10);
   bx = Math.max(stage.left + 4, Math.min(bx, stage.left + stage.width - bw - 4));
   by = Math.max(stage.top + 4, by);
   ctx.fillStyle = "rgba(12,8,20,0.88)";
@@ -753,7 +702,7 @@ function startLoop() {
     last = now;
     stepDoor(dt);
     stepElevator(dt);
-    if (arcade) arcade.step(dt);
+    if (world) world.step(dt);
     rockets = stepFireworks(rockets);
 
     ctx.clearRect(0, 0, cssW, cssH);

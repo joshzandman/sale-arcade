@@ -87,11 +87,21 @@ async function loadAllSprites() {
     look: "sprites/npc-look.jpg",
     attendant: "sprites/elevator-attendant.jpg",
   };
+  for (let i = 0; i < 6; i += 1) {
+    files[`idle-${i}`] = `sprites/npc-idle-${i}.jpg`;
+    files[`look-${i}`] = `sprites/npc-look-${i}.jpg`;
+    files[`cart-${i}`] = `sprites/npc-cart-${i}.jpg`;
+    files[`celebrate-${i}`] = `sprites/npc-celebrate-${i}.jpg`;
+  }
   const out = {};
   await Promise.all(
     Object.entries(files).map(async ([key, url]) => {
-      out[key] = await loadKeyedSprite(url);
-      console.log("sprite", key, out[key].sw, "x", out[key].sh);
+      try {
+        out[key] = await loadKeyedSprite(url);
+        console.log("sprite", key, out[key].sw, "x", out[key].sh);
+      } catch (err) {
+        console.error("sprite load failed", key, url, err);
+      }
     })
   );
   return out;
