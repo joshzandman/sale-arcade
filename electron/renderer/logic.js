@@ -85,6 +85,31 @@
     return (path || []).some((p) => String(p).toLowerCase() === "products");
   }
 
+  function productHandle(path) {
+    const i = (path || []).findIndex((p) => String(p).toLowerCase() === "products");
+    return i >= 0 ? String(path[i + 1] || "") : "";
+  }
+
+  function isHomePath(path) {
+    if (!path || !path.length) return true;
+    return path.length === 1 && /^[a-z]{2}(?:-[a-z]{2})?$/i.test(path[0]);
+  }
+
+  function titleKey(value) {
+    return String(value || "")
+      .toLowerCase()
+      .replace(/&amp;/g, "and")
+      .replace(/[^a-z0-9]+/g, "");
+  }
+
+  function isShopNameTitle(title, storeName) {
+    const key = titleKey(title);
+    if (!key) return false;
+    if (key === "joshzandman" || key === "zandmansmagicshop") return true;
+    if (storeName && key === titleKey(storeName)) return true;
+    return false;
+  }
+
   function visitInfo(payload, npc) {
     payload = payload || {};
     const hasUrl = Boolean(payload.pageUrl);
@@ -92,10 +117,10 @@
     const isProduct = isProductPath(path);
     let title = "";
     if (isProduct) {
-      title = payload.productTitle || prettySlug(path[1]) || "";
+      title = payload.productTitle || prettySlug(productHandle(path)) || "";
     } else if (payload.collectionTitle) {
       title = String(payload.collectionTitle);
-    } else if (hasUrl && !path.length) {
+    } else if (hasUrl && isHomePath(path)) {
       title = "Home";
     } else if (path[0] === "collections" && path[1]) {
       title = prettySlug(path[1]);
@@ -117,13 +142,16 @@
     } else if (path.length) {
       title = prettySlug(path[path.length - 1]);
     }
+    if (isShopNameTitle(title, payload.storeName)) {
+      title = "Home";
+    }
     if (!title) {
       return npc
         ? { kind: npc.viewKind || "browsing", title: npc.viewing || "Home" }
         : { kind: "browsing", title: "Home" };
     }
     return {
-      kind: isProduct ? "viewing" : "browsing",
+      kind: isProduct && title !== "Home" ? "viewing" : "browsing",
       title: String(title).slice(0, 64),
     };
   }
@@ -1119,6 +1147,7 @@
     isAboutPage,
     cartishType,
     isProductPath,
+    isShopNameTitle,
     visitInfo,
     hoverViewLine,
     visitorName,

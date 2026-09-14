@@ -79,6 +79,29 @@ describe("visitInfo labels", () => {
     assert.equal(info.title, "About");
   });
 
+  it("treats shop-name titles as Home", () => {
+    const home = visitInfo({
+      pageUrl: "https://joshzandman.com/",
+      pageTitle: "Josh Zandman | Book Tests & Magic – JoshZandman",
+    });
+    assert.equal(home.title, "Home");
+    assert.equal(home.kind, "browsing");
+
+    const locale = visitInfo({
+      pageUrl: "https://joshzandman.com/en-us",
+      pageTitle: "Josh Zandman | Book Tests & Magic – JoshZandman",
+    });
+    assert.equal(locale.title, "Home");
+    assert.equal(locale.kind, "browsing");
+
+    const shopOnly = visitInfo({
+      pageUrl: "https://joshzandman.com/account",
+      pageTitle: "JoshZandman",
+    });
+    assert.equal(shopOnly.title, "Home");
+    assert.equal(shopOnly.kind, "browsing");
+  });
+
   it("labels home and cart", () => {
     assert.equal(
       visitInfo({ pageUrl: "https://joshzandman.com/" }).title,
