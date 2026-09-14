@@ -505,6 +505,29 @@ function rebuildMenu() {
   tray.setToolTip(`Sale Arcade — ${visitorCount} on stage`);
 }
 
+function discardSocket(ws) {
+  if (!ws) return;
+  ws.on("error", () => {});
+  ws.removeAllListeners("open");
+  ws.removeAllListeners("message");
+  ws.removeAllListeners("close");
+  try {
+    if (ws.readyState === WebSocket.CONNECTING) {
+      ws.once("open", () => {
+        try {
+          ws.close();
+        } catch {
+          /* ignore */
+        }
+      });
+      return;
+    }
+    if (ws.readyState !== WebSocket.CLOSED) ws.terminate();
+  } catch {
+    /* already dead */
+  }
+}
+
 function connectWorker(env) {
   const url = env.WORKER_URL;
   const secret = env.SHARED_SECRET;
@@ -516,16 +539,7 @@ function connectWorker(env) {
   const gen = ++socketGen;
   clearTimeout(reconnectTimer);
   if (socket) {
-    socket.removeAllListeners();
-    try {
-      socket.terminate();
-    } catch {
-      try {
-        socket.close();
-      } catch {
-        /* already dead */
-      }
-    }
+    discardSocket(socket);
     socket = null;
   }
   const wsUrl = url.includes("?")
@@ -564,11 +578,7 @@ function connectWorker(env) {
   });
   socket.on("error", () => {
     if (gen !== socketGen) return;
-    try {
-      socket.close();
-    } catch {
-      /* already closing */
-    }
+    connected = false;
   });
 }
 
