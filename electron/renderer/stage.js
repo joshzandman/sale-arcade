@@ -637,7 +637,7 @@ function hoverCardLines(npc) {
   return lines;
 }
 
-function drawHoverCard(npc) {
+function hoverCardLayout(npc) {
   const lines = hoverCardLines(npc);
   const padX = 8;
   const padY = 6;
@@ -656,6 +656,34 @@ function drawHoverCard(npc) {
   let by = Math.round((b.y || groundY() - npcHeight()) - bh - 10);
   bx = Math.max(stage.left + 4, Math.min(bx, stage.left + stage.width - bw - 4));
   by = Math.max(stage.top + 4, by);
+  return { npc, lines, widths, bw, bh, bx, by, padX, padY, gap };
+}
+
+function cardsOverlap(a, b) {
+  return a.bx < b.bx + b.bw && a.bx + a.bw > b.bx && a.by < b.by + b.bh && a.by + a.bh > b.by;
+}
+
+function stackHoverCards(cards) {
+  for (let i = 0; i < cards.length; i += 1) {
+    let moved = true;
+    let guard = 0;
+    while (moved && guard < 8) {
+      moved = false;
+      guard += 1;
+      for (let j = 0; j < i; j += 1) {
+        if (!cardsOverlap(cards[i], cards[j])) continue;
+        cards[i].by = cards[j].by - cards[i].bh - 8;
+        if (cards[i].by < stage.top + 4) {
+          cards[i].by = cards[j].by + cards[j].bh + 8;
+        }
+        moved = true;
+      }
+    }
+  }
+}
+
+function paintHoverCard(card) {
+  const { lines, widths, bw, bh, bx, by, padX, padY, gap } = card;
   ctx.fillStyle = "rgba(12,8,20,0.88)";
   ctx.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
   ctx.fillStyle = "#1a1028";
@@ -671,6 +699,15 @@ function drawHoverCard(npc) {
     drawPixelText(ctx, line.text, textX, y, line.scale, line.color);
     y += 7 * line.scale + gap;
   });
+}
+
+function drawHoverCards(ordered) {
+  const cards = [];
+  for (const npc of ordered) {
+    if (npcVisible(npc)) cards.push(hoverCardLayout(npc));
+  }
+  stackHoverCards(cards);
+  for (const card of cards) paintHoverCard(card);
 }
 
 function drawCaption() {
@@ -710,11 +747,7 @@ function startLoop() {
     drawLandmark();
     const ordered = [...npcs.values()].sort((a, b) => a.x - b.x);
     for (const npc of ordered) drawNpc(npc);
-    if (showAllTips) {
-      for (const npc of ordered) {
-        if (npcVisible(npc)) drawHoverCard(npc);
-      }
-    }
+    if (showAllTips) drawHoverCards(ordered);
     drawFireworks(ctx, rockets);
     drawCaption();
     requestAnimationFrame(frame);

@@ -137,6 +137,24 @@ describe("stage events", () => {
     assert.equal(visitorName({ firstName: "Josh", lastName: "Zandman" }), "Josh Zandman");
   });
 
+  it("does not let same-direction walkers clump", () => {
+    const { stage, npc, tick } = live();
+    stage.handleEvent({ type: "enter", sessionId: "a" });
+    stage.handleEvent({ type: "enter", sessionId: "b" });
+    const front = npc("a");
+    const rear = npc("b");
+    front.x = 500;
+    rear.x = 520;
+    front.state = "idle";
+    rear.state = "idle";
+    front.idleMode = "walk";
+    rear.idleMode = "walk";
+    front.browseTarget = 50;
+    rear.browseTarget = 50;
+    tick(800);
+    assert.ok(Math.abs(front.x - rear.x) >= 40);
+  });
+
   it("lets walking NPCs pass without shoving", () => {
     const { stage, npc, tick } = live();
     stage.handleEvent({ type: "enter", sessionId: "p1" });

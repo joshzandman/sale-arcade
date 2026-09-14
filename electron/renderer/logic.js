@@ -837,8 +837,11 @@
           if (getLandmark() === "elevator" && elevatorReady()) {
             npc.disembarked = true;
           }
-          npc.x -= WALK_SPEED * dt;
-          npc.bob = Math.abs(Math.sin(now() / 90)) * 4;
+          const nextX = npc.x - WALK_SPEED * dt;
+          if (!sameDirBlocked(npc, nextX, -1)) {
+            npc.x = nextX;
+            npc.bob = Math.abs(Math.sin(now() / 90)) * 4;
+          }
           if (npc.x <= npc.targetX) {
             npc.x = npc.targetX;
             npc.state = npc.hadCart ? "cart" : "idle";
@@ -870,7 +873,8 @@
           if (!elevatorReady() && npc.x >= cabin - 12) {
             npc.x = cabin - 12;
           } else {
-            npc.x += WALK_SPEED * dt;
+            const nextX = npc.x + WALK_SPEED * dt;
+            if (!sameDirBlocked(npc, nextX, 1)) npc.x = nextX;
           }
           if (elevatorReady() && npc.x >= cabin + 16) {
             npcs.delete(npc.id);
@@ -879,7 +883,8 @@
             return;
           }
         } else {
-          npc.x += WALK_SPEED * dt;
+          const nextX = npc.x + WALK_SPEED * dt;
+          if (!sameDirBlocked(npc, nextX, 1)) npc.x = nextX;
           if (npc.x > doorX() - 20) requestLandmark();
           if (npc.x >= doorX() + 4) {
             npcs.delete(npc.id);
@@ -926,22 +931,72 @@
       }
     }
 
+    function walkDir(npc) {
+      if (!npc) return 0;
+      if (npc.state === "entering") return -1;
+      if (npc.state === "leaving") return 1;
+      if (npc.idleMode === "walk" && npc.browseTarget != null) {
+        const delta = npc.browseTarget - npc.x;
+        if (Math.abs(delta) > 4) return Math.sign(delta);
+      }
+      return 0;
+    }
+
+    function sameDirBlocked(npc, nextX, dir) {
+      if (!dir) return false;
+      const gap = getBodyWidth();
+      for (const other of npcs.values()) {
+        if (other === npc) continue;
+        if (walkDir(other) !== dir) continue;
+        if (dir < 0 && other.x < npc.x && nextX - other.x < gap) return true;
+        if (dir > 0 && other.x > npc.x && other.x - nextX < gap) return true;
+      }
+      return false;
+    }
+
     function pickWalkTarget(npc) {
       const left = stageLeft();
       const right = stageRight();
       const span = Math.max(8, right - left);
       const gap = getBodyWidth();
-      const others = [];
-      for (const other of npcs.values()) {
-        if (other === npc) continue;
-        others.push(other.x);
-        if (other.browseTarget != null) others.push(other.browseTarget);
+      const home = slotX(npc.slot);
+      function clear(x) {
+        if (x < left || x > right) return false;
+        if (Math.abs(x - npc.x) < Math.max(24, gap * 0.4)) return false;
+        for (const other of npcs.values()) {
+          if (other === npc) continue;
+          if (Math.abs(other.x - x) < gap) return false;
+          if (other.browseTarget != null && Math.abs(other.browseTarget - x) < gap) {
+            return false;
+          }
+        }
+        return true;
       }
+      const lane = Math.max(28, gap * 0.45);
       for (let i = 0; i < 10; i += 1) {
-        const x = left + Math.random() * span;
-        if (others.every((ox) => Math.abs(ox - x) >= gap * 0.85)) return x;
+        const x = home + (Math.random() * 2 - 1) * lane;
+        if (clear(x)) return x;
       }
-      return left + Math.random() * span;
+      for (let i = 0; i < 14; i += 1) {
+        const x = left + Math.random() * span;
+        if (clear(x)) return x;
+      }
+      return null;
+    }
+
+    function beginWalk(npc) {
+      const target = pickWalkTarget(npc);
+      if (target == null) {
+        npc.idleMode = "dwell";
+        npc.dwellT = 0;
+        npc.dwellFor = 4 + Math.random() * 4;
+        npc.browseTarget = null;
+        return;
+      }
+      npc.idleMode = "walk";
+      npc.dwellT = 0;
+      npc.look = "side";
+      npc.browseTarget = target;
     }
 
     function stepRoam(npc, dt, walkSpeed) {
@@ -963,21 +1018,31 @@
           npc.look = "side";
         }
         npc.bob = 0;
-        if (npc.dwellT >= dwellFor) {
-          npc.idleMode = "walk";
-          npc.dwellT = 0;
-          npc.look = "side";
-          npc.browseTarget = pickWalkTarget(npc);
-        }
+        if (npc.dwellT >= dwellFor) beginWalk(npc);
         return;
       }
       npc.look = "side";
-      if (npc.browseTarget == null) npc.browseTarget = pickWalkTarget(npc);
+      if (npc.browseTarget == null) {
+        beginWalk(npc);
+        if (npc.idleMode !== "walk") return;
+      }
       const gap = npc.browseTarget - npc.x;
       if (Math.abs(gap) > 4) {
         const dir = Math.sign(gap);
+        const nextX = npc.x + dir * walkSpeed * dt;
+        if (sameDirBlocked(npc, nextX, dir)) {
+          beginWalk(npc);
+          if (npc.idleMode === "walk" && Math.sign(npc.browseTarget - npc.x) === dir) {
+            npc.idleMode = "dwell";
+            npc.dwellT = 0;
+            npc.dwellFor = 3 + Math.random() * 4;
+            npc.browseTarget = null;
+            npc.bob = 0;
+          }
+          return;
+        }
         npc.facing = dir;
-        npc.x += dir * walkSpeed * dt;
+        npc.x = nextX;
         npc.bob = Math.abs(Math.sin(now() / 90)) * 4;
       } else {
         npc.x = npc.browseTarget;
@@ -1001,10 +1066,7 @@
         const a = still[i];
         const b = still[i + 1];
         if (!tooClose(a, b, gap * 0.85)) continue;
-        b.idleMode = "walk";
-        b.dwellT = 0;
-        b.look = "side";
-        b.browseTarget = pickWalkTarget(b);
+        beginWalk(b);
       }
     }
 
