@@ -199,9 +199,23 @@ analytics.subscribe("page_viewed", function (event) {
   startLeaveWatch();
 });
 
+function isProductPage(url) {
+  try {
+    const path = new URL(url).pathname.split("/").filter(Boolean);
+    for (let i = 0; i < path.length; i += 1) {
+      if (String(path[i]).toLowerCase() === "products") return true;
+    }
+    return false;
+  } catch (err) {
+    return String(url || "").toLowerCase().indexOf("/products/") >= 0;
+  }
+}
+
 analytics.subscribe("product_viewed", function (event) {
+  const info = pageInfo(event);
+  if (!isProductPage(info.pageUrl)) return;
   const title = pick(event, ["data", "productVariant", "product", "title"]);
-  currentPage = Object.assign(pageInfo(event), {
+  currentPage = Object.assign(info, {
     productTitle: title,
     collectionTitle: "",
   });

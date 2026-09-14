@@ -31,6 +31,17 @@ describe("visitInfo labels", () => {
     );
   });
 
+  it("ignores product impressions on collection pages", () => {
+    const info = visitInfo({
+      type: "view",
+      productTitle: "1984",
+      pageUrl: "https://joshzandman.com/collections/best-sellers",
+      collectionTitle: "Best Sellers",
+    });
+    assert.equal(info.kind, "browsing");
+    assert.equal(info.title, "Best Sellers");
+  });
+
   it("does not treat cart events as product views", () => {
     const info = visitInfo({
       type: "cart",

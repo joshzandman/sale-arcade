@@ -81,12 +81,15 @@
     );
   }
 
+  function isProductPath(path) {
+    return (path || []).some((p) => String(p).toLowerCase() === "products");
+  }
+
   function visitInfo(payload, npc) {
     payload = payload || {};
     const hasUrl = Boolean(payload.pageUrl);
     const path = hasUrl ? urlPath(payload.pageUrl) : [];
-    const useProductTitle = payload.productTitle && !cartishType(payload.type);
-    const isProduct = Boolean(useProductTitle) || path[0] === "products";
+    const isProduct = isProductPath(path);
     let title = "";
     if (isProduct) {
       title = payload.productTitle || prettySlug(path[1]) || "";
@@ -167,26 +170,10 @@
     return preferred;
   }
 
-  function separateNpcs(list, minGap) {
+  function tooClose(a, b, minGap) {
+    if (!a || !b) return false;
     const gap = Math.max(8, Number(minGap) || 80);
-    const npcs = (list || []).filter(Boolean).sort((a, b) => a.x - b.x);
-    for (let i = 0; i < npcs.length - 1; i += 1) {
-      const a = npcs[i];
-      const b = npcs[i + 1];
-      const overlap = gap - (b.x - a.x);
-      if (overlap <= 0) continue;
-      const aLeaving = a.state === "leaving";
-      const bLeaving = b.state === "leaving";
-      if (aLeaving && !bLeaving) {
-        b.x += overlap;
-      } else if (bLeaving && !aLeaving) {
-        a.x -= overlap;
-      } else {
-        a.x -= overlap / 2;
-        b.x += overlap / 2;
-      }
-    }
-    return npcs;
+    return Math.abs(a.x - b.x) < gap;
   }
 
   function normalizePlace(value) {
@@ -850,20 +837,8 @@
           if (getLandmark() === "elevator" && elevatorReady()) {
             npc.disembarked = true;
           }
-          const nextX = npc.x - WALK_SPEED * dt;
-          let blocked = false;
-          const gap = getBodyWidth();
-          for (const other of npcs.values()) {
-            if (other === npc) continue;
-            if (other.x < npc.x && npc.x - other.x < gap) {
-              blocked = true;
-              break;
-            }
-          }
-          if (!blocked) {
-            npc.x = nextX;
-            npc.bob = Math.abs(Math.sin(now() / 90)) * 4;
-          }
+          npc.x -= WALK_SPEED * dt;
+          npc.bob = Math.abs(Math.sin(now() / 90)) * 4;
           if (npc.x <= npc.targetX) {
             npc.x = npc.targetX;
             npc.state = npc.hadCart ? "cart" : "idle";
@@ -956,12 +931,15 @@
       const right = stageRight();
       const span = Math.max(8, right - left);
       const gap = getBodyWidth();
-      const others = [...npcs.values()]
-        .filter((other) => other !== npc)
-        .map((other) => other.x);
-      for (let i = 0; i < 8; i += 1) {
+      const others = [];
+      for (const other of npcs.values()) {
+        if (other === npc) continue;
+        others.push(other.x);
+        if (other.browseTarget != null) others.push(other.browseTarget);
+      }
+      for (let i = 0; i < 10; i += 1) {
         const x = left + Math.random() * span;
-        if (others.every((ox) => Math.abs(ox - x) >= gap * 0.75)) return x;
+        if (others.every((ox) => Math.abs(ox - x) >= gap * 0.85)) return x;
       }
       return left + Math.random() * span;
     }
@@ -998,25 +976,9 @@
       const gap = npc.browseTarget - npc.x;
       if (Math.abs(gap) > 4) {
         const dir = Math.sign(gap);
-        const nextX = npc.x + dir * walkSpeed * dt;
-        let blocked = false;
-        const body = getBodyWidth();
-        for (const other of npcs.values()) {
-          if (other === npc) continue;
-          if (dir < 0 && other.x < npc.x && npc.x - other.x < body) blocked = true;
-          if (dir > 0 && other.x > npc.x && other.x - npc.x < body) blocked = true;
-        }
-        if (!blocked) {
-          npc.facing = dir;
-          npc.x = nextX;
-          npc.bob = Math.abs(Math.sin(now() / 90)) * 4;
-        } else {
-          npc.idleMode = "dwell";
-          npc.dwellT = 0;
-          npc.dwellFor = DWELL_S + Math.random() * 2;
-          npc.browseTarget = null;
-          npc.bob = 0;
-        }
+        npc.facing = dir;
+        npc.x += dir * walkSpeed * dt;
+        npc.bob = Math.abs(Math.sin(now() / 90)) * 4;
       } else {
         npc.x = npc.browseTarget;
         npc.browseTarget = null;
@@ -1027,9 +989,28 @@
       }
     }
 
+    function giveStandingSpace() {
+      const gap = getBodyWidth();
+      const still = [...npcs.values()]
+        .filter(
+          (n) =>
+            (n.state === "idle" || n.state === "cart") && n.idleMode !== "walk"
+        )
+        .sort((a, b) => a.x - b.x);
+      for (let i = 0; i < still.length - 1; i += 1) {
+        const a = still[i];
+        const b = still[i + 1];
+        if (!tooClose(a, b, gap * 0.85)) continue;
+        b.idleMode = "walk";
+        b.dwellT = 0;
+        b.look = "side";
+        b.browseTarget = pickWalkTarget(b);
+      }
+    }
+
     function step(dt) {
       for (const npc of [...npcs.values()]) stepNpc(npc, dt);
-      separateNpcs([...npcs.values()], getBodyWidth());
+      giveStandingSpace();
       const left = stageLeft();
       const right = stageRight();
       for (const npc of npcs.values()) {
@@ -1075,6 +1056,7 @@
     shopifyPageHandle,
     isAboutPage,
     cartishType,
+    isProductPath,
     visitInfo,
     hoverViewLine,
     visitorName,
@@ -1082,7 +1064,7 @@
     minNpcGap,
     hashOutfit,
     pickOutfit,
-    separateNpcs,
+    tooClose,
     normalizePlace,
     isHiddenLocation,
     isCheckoutPayload,

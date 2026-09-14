@@ -7,7 +7,7 @@ const {
   LANDMARKS,
   NPC_SIZES,
   pickOutfit,
-  separateNpcs,
+  tooClose,
   visitorName,
   npcHeightFor,
 } = require("../electron/renderer/logic");
@@ -137,11 +137,47 @@ describe("stage events", () => {
     assert.equal(visitorName({ firstName: "Josh", lastName: "Zandman" }), "Josh Zandman");
   });
 
-  it("nudges overlapping NPCs apart", () => {
-    const a = { id: "a", x: 100, state: "idle" };
-    const b = { id: "b", x: 110, state: "idle" };
-    separateNpcs([a, b], 80);
-    assert.ok(b.x - a.x >= 80);
+  it("lets walking NPCs pass without shoving", () => {
+    const { stage, npc, tick } = live();
+    stage.handleEvent({ type: "enter", sessionId: "p1" });
+    stage.handleEvent({ type: "enter", sessionId: "p2" });
+    const a = npc("p1");
+    const b = npc("p2");
+    a.x = 400;
+    b.x = 410;
+    a.state = "idle";
+    b.state = "idle";
+    a.idleMode = "walk";
+    b.idleMode = "walk";
+    a.browseTarget = 100;
+    b.browseTarget = 700;
+    const ax = a.x;
+    const bx = b.x;
+    tick(200);
+    assert.ok(a.x < ax);
+    assert.ok(b.x > bx);
+  });
+
+  it("sends a standing NPC walking when they share a spot", () => {
+    const { stage, npc, tick } = live();
+    stage.handleEvent({ type: "enter", sessionId: "s1" });
+    stage.handleEvent({ type: "enter", sessionId: "s2" });
+    const a = npc("s1");
+    const b = npc("s2");
+    a.x = 300;
+    b.x = 305;
+    a.state = "idle";
+    b.state = "idle";
+    a.idleMode = "dwell";
+    b.idleMode = "dwell";
+    tick(50);
+    const walking = [a, b].filter((n) => n.idleMode === "walk");
+    assert.equal(walking.length, 1);
+  });
+
+  it("treats nearby x as too close", () => {
+    assert.equal(tooClose({ x: 100 }, { x: 110 }, 80), true);
+    assert.equal(tooClose({ x: 100 }, { x: 200 }, 80), false);
   });
 
   it("looks around while standing, then walks after a dwell", () => {
