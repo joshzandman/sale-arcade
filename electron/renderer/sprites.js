@@ -1,6 +1,9 @@
 function isMagentaKey(r, g, b, a) {
   if (a < 8) return true;
-  return r > 170 && b > 90 && g < 190 && r - g > 35 && (r + b) / 2 - g > 30;
+  const dr = r - 242;
+  const dg = g - 95;
+  const db = b - 184;
+  return dr * dr + dg * dg + db * db < 48 * 48;
 }
 
 async function loadKeyedSprite(url) {
