@@ -18,7 +18,7 @@ let rockets = [];
 let caption = null;
 let door = { phase: "closed", t: 0 };
 let doorHold = 0;
-let elevator = { phase: "hidden", rise: 0, doors: 0, hold: 0 };
+let elevator = { phase: "hidden", rise: 0, doors: 0, hold: 0, reason: "enter" };
 let last = performance.now();
 let muted = false;
 let showAllTips = true;
@@ -57,7 +57,7 @@ function applySettings(data) {
   if (!data) return;
   if (SaleArcade.LANDMARKS.indexOf(data.landmark) >= 0) {
     if (settings.landmark !== data.landmark) {
-      elevator = { phase: "hidden", rise: 0, doors: 0, hold: 0 };
+      elevator = { phase: "hidden", rise: 0, doors: 0, hold: 0, reason: "enter" };
       door = { phase: "closed", t: 0 };
       doorHold = 0;
     }
@@ -205,16 +205,28 @@ function openDoor() {
   doorHold = 0.9;
 }
 
+function elevatorReason() {
+  for (const n of npcs.values()) {
+    if (n.state === "leaving") return "exit";
+  }
+  return "enter";
+}
+
 function callElevator() {
   if (settings.landmark !== "elevator") return;
+  const reason = elevatorReason();
   if (elevator.phase === "hidden") {
     elevator.phase = "rising";
     elevator.rise = 0;
     elevator.doors = 0;
-    ArcadeAudio.elevator();
+    elevator.reason = reason;
+    if (reason === "exit") ArcadeAudio.elevatorExit();
+    else ArcadeAudio.elevatorEnter();
   } else if (elevator.phase === "descending" && elevator.rise < 0.35) {
     elevator.phase = "rising";
-    ArcadeAudio.elevator();
+    elevator.reason = reason;
+    if (reason === "exit") ArcadeAudio.elevatorExit();
+    else ArcadeAudio.elevatorEnter();
   }
   elevator.hold = 0.85;
 }
@@ -283,7 +295,8 @@ function stepElevator(dt) {
     if (elevator.rise >= 1) {
       elevator.phase = "opening";
       elevator.doors = 0;
-      ArcadeAudio.ding();
+      if (elevator.reason === "exit") ArcadeAudio.dingExit();
+      else ArcadeAudio.dingEnter();
     }
   } else if (elevator.phase === "opening") {
     elevator.doors = Math.min(1, elevator.doors + dt * 2.8);

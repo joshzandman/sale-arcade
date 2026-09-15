@@ -8,19 +8,20 @@ const ArcadeAudio = (() => {
     return ctx;
   }
 
-  function tone(freq, dur, type, gain) {
+  function tone(freq, dur, type, gain, delay) {
     if (muted) return;
     const ac = ensure();
     const osc = ac.createOscillator();
     const g = ac.createGain();
+    const start = ac.currentTime + (delay || 0);
     osc.type = type || "square";
     osc.frequency.value = freq;
-    g.gain.value = gain || 0.14;
+    g.gain.setValueAtTime(gain || 0.14, start);
     osc.connect(g);
     g.connect(ac.destination);
-    osc.start();
-    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
-    osc.stop(ac.currentTime + dur);
+    osc.start(start);
+    g.gain.exponentialRampToValueAtTime(0.001, start + dur);
+    osc.stop(start + dur);
   }
 
   function noise(dur, gain) {
@@ -48,11 +49,27 @@ const ArcadeAudio = (() => {
       noise(0.12, 0.08);
     },
     elevator() {
-      tone(523, 0.12, "square", 0.12);
-      tone(392, 0.2, "square", 0.08);
+      this.elevatorEnter();
+    },
+    elevatorEnter() {
+      tone(392, 0.12, "square", 0.12, 0);
+      tone(523, 0.14, "square", 0.13, 0.1);
+      tone(659, 0.2, "square", 0.14, 0.2);
+    },
+    elevatorExit() {
+      tone(659, 0.12, "square", 0.14, 0);
+      tone(523, 0.14, "square", 0.13, 0.1);
+      tone(330, 0.24, "square", 0.14, 0.2);
     },
     ding() {
-      tone(659, 0.16, "square", 0.13);
+      this.dingEnter();
+    },
+    dingEnter() {
+      tone(784, 0.16, "square", 0.14);
+    },
+    dingExit() {
+      tone(392, 0.22, "square", 0.14);
+      tone(262, 0.28, "square", 0.11, 0.08);
     },
     step() {
       tone(140, 0.04, "square", 0.06);
