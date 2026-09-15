@@ -696,12 +696,8 @@ function paintHoverCard(card) {
   if (npc.tipAlpha <= 0.01) return;
   ctx.save();
   ctx.globalAlpha = npc.tipAlpha;
-  ctx.fillStyle = "rgba(12,8,20,0.88)";
-  ctx.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
   ctx.fillStyle = "#1a1028";
   ctx.fillRect(bx, by, bw, bh);
-  ctx.fillStyle = "#6b5a3a";
-  ctx.fillRect(bx, by, bw, 2);
   let y = by + padY;
   lines.forEach((line, i) => {
     const textX =
