@@ -674,27 +674,28 @@ function cardsOverlap(a, b) {
   return a.bx < b.bx + b.bw && a.bx + a.bw > b.bx && a.by < b.by + b.bh && a.by + a.bh > b.by;
 }
 
-function stackHoverCards(cards) {
-  for (let i = 0; i < cards.length; i += 1) {
-    let moved = true;
-    let guard = 0;
-    while (moved && guard < 8) {
-      moved = false;
-      guard += 1;
-      for (let j = 0; j < i; j += 1) {
-        if (!cardsOverlap(cards[i], cards[j])) continue;
-        cards[i].by = cards[j].by - cards[i].bh - 8;
-        if (cards[i].by < stage.top + 4) {
-          cards[i].by = cards[j].by + cards[j].bh + 8;
-        }
-        moved = true;
-      }
+function fadeOverlappingHoverCards(cards) {
+  const visible = [];
+  const ranked = cards.slice().sort((a, b) => String(a.npc.id).localeCompare(String(b.npc.id)));
+  for (const card of ranked) {
+    if (visible.some((other) => cardsOverlap(card, other))) {
+      card.faded = true;
+    } else {
+      card.faded = false;
+      visible.push(card);
     }
   }
 }
 
 function paintHoverCard(card) {
-  const { lines, widths, bw, bh, bx, by, padX, padY, gap } = card;
+  const { lines, widths, bw, bh, bx, by, padX, padY, gap, npc, faded } = card;
+  const target = faded ? 0 : 1;
+  const prev = npc.tipAlpha == null ? 1 : npc.tipAlpha;
+  npc.tipAlpha = prev + (target - prev) * 0.22;
+  if (Math.abs(npc.tipAlpha - target) < 0.012) npc.tipAlpha = target;
+  if (npc.tipAlpha <= 0.01) return;
+  ctx.save();
+  ctx.globalAlpha = npc.tipAlpha;
   ctx.fillStyle = "rgba(12,8,20,0.88)";
   ctx.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
   ctx.fillStyle = "#1a1028";
@@ -710,6 +711,7 @@ function paintHoverCard(card) {
     drawPixelText(ctx, line.text, textX, y, line.scale, line.color);
     y += 7 * line.scale + gap;
   });
+  ctx.restore();
 }
 
 function drawHoverCards(ordered) {
@@ -717,8 +719,13 @@ function drawHoverCards(ordered) {
   for (const npc of ordered) {
     if (npcVisible(npc)) cards.push(hoverCardLayout(npc));
   }
-  stackHoverCards(cards);
-  for (const card of cards) paintHoverCard(card);
+  fadeOverlappingHoverCards(cards);
+  for (const card of cards) {
+    if (card.faded) paintHoverCard(card);
+  }
+  for (const card of cards) {
+    if (!card.faded) paintHoverCard(card);
+  }
 }
 
 function drawCaption() {
