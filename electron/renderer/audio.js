@@ -15,7 +15,7 @@ const ArcadeAudio = (() => {
     const g = ac.createGain();
     osc.type = type || "square";
     osc.frequency.value = freq;
-    g.gain.value = gain || 0.05;
+    g.gain.value = gain || 0.14;
     osc.connect(g);
     g.connect(ac.destination);
     osc.start();
@@ -32,7 +32,7 @@ const ArcadeAudio = (() => {
     const src = ac.createBufferSource();
     const g = ac.createGain();
     src.buffer = buffer;
-    g.gain.value = gain || 0.04;
+    g.gain.value = gain || 0.1;
     src.connect(g);
     g.connect(ac.destination);
     src.start();
@@ -44,27 +44,27 @@ const ArcadeAudio = (() => {
       muted = value;
     },
     door() {
-      tone(180, 0.18, "square", 0.04);
-      noise(0.12, 0.03);
+      tone(180, 0.18, "square", 0.11);
+      noise(0.12, 0.08);
     },
     elevator() {
-      tone(523, 0.12, "square", 0.045);
-      tone(392, 0.2, "square", 0.03);
+      tone(523, 0.12, "square", 0.12);
+      tone(392, 0.2, "square", 0.08);
     },
     ding() {
-      tone(659, 0.16, "square", 0.05);
+      tone(659, 0.16, "square", 0.13);
     },
     step() {
-      tone(140, 0.04, "square", 0.02);
+      tone(140, 0.04, "square", 0.06);
     },
     cart() {
-      tone(220, 0.05, "square", 0.025);
-      tone(90, 0.08, "square", 0.02);
+      tone(220, 0.05, "square", 0.07);
+      tone(90, 0.08, "square", 0.05);
     },
     boom() {
-      noise(0.25, 0.07);
-      tone(520, 0.35, "square", 0.06);
-      tone(180, 0.5, "sawtooth", 0.04);
+      noise(0.25, 0.16);
+      tone(520, 0.35, "square", 0.15);
+      tone(180, 0.5, "sawtooth", 0.1);
     },
   };
 })();

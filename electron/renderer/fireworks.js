@@ -16,7 +16,8 @@ function spawnFireworks(bursts, originX, originY) {
       y: originY + Math.random() * 40,
       vx: (Math.random() - 0.5) * 3.2,
       vy: -6.5 - Math.random() * 4.5,
-      life: 28 + Math.random() * 22,
+      delay: Math.floor(i / 4) * 22 + Math.random() * 12,
+      life: 36 + Math.random() * 28,
       color: FW_COLORS[i % FW_COLORS.length],
       bits: [],
       exploded: false,
@@ -27,6 +28,10 @@ function spawnFireworks(bursts, originX, originY) {
 
 function stepFireworks(rockets) {
   for (const rocket of rockets) {
+    if ((rocket.delay || 0) > 0) {
+      rocket.delay -= 1;
+      continue;
+    }
     if (!rocket.exploded) {
       rocket.x += rocket.vx;
       rocket.y += rocket.vy;
@@ -38,12 +43,14 @@ function stepFireworks(rockets) {
         for (let i = 0; i < n; i += 1) {
           const angle = (i / n) * Math.PI * 2 + Math.random() * 0.2;
           const speed = 1.8 + Math.random() * 3.8;
+          const life = 110 + Math.random() * 50;
           rocket.bits.push({
             x: rocket.x,
             y: rocket.y,
             vx: Math.cos(angle) * speed,
             vy: Math.sin(angle) * speed,
-            life: 55 + Math.random() * 35,
+            life,
+            maxLife: life,
             color: Math.random() > 0.7 ? "#fffbe6" : rocket.color,
             size: 4 + Math.floor(Math.random() * 4),
           });
@@ -60,6 +67,7 @@ function stepFireworks(rockets) {
     }
   }
   return rockets.filter((rocket) => {
+    if ((rocket.delay || 0) > 0) return true;
     if (!rocket.exploded) return true;
     rocket.bits = rocket.bits.filter((bit) => bit.life > 0);
     return rocket.bits.length > 0;
@@ -75,7 +83,7 @@ function drawFireworks(ctx, rockets) {
       ctx.fillRect(Math.round(rocket.x), Math.round(rocket.y), 4, 8);
     } else {
       for (const bit of rocket.bits) {
-        ctx.globalAlpha = Math.max(0.15, bit.life / 40);
+        ctx.globalAlpha = Math.max(0.12, bit.life / (bit.maxLife || 90));
         ctx.fillStyle = bit.color;
         const s = bit.size;
         ctx.fillRect(Math.round(bit.x), Math.round(bit.y), s, s);

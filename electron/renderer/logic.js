@@ -884,7 +884,7 @@
         stepRoam(npc, dt, npc.state === "cart" ? CART_STROLL_SPEED : STROLL_SPEED);
       } else if (npc.state === "celebrating") {
         npc.celebT = (npc.celebT || 0) + dt;
-        if (npc.celebT > 2.6) {
+        if (npc.celebT > 6) {
           npc.state = "idle";
           npc.look = "up";
           npc.idleMode = "dwell";

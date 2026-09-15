@@ -252,7 +252,7 @@ function bootArcade() {
       caption = { text: `${amount} - ${title}`, t: 0 };
       const originX = (npc && npc.x) || cssW / 2;
       const originY = groundY() - 220;
-      rockets = rockets.concat(spawnFireworks(12, originX, originY));
+      rockets = rockets.concat(spawnFireworks(28, originX, originY));
     },
     loadImage: (url) => loadProductImage(url),
   });
@@ -713,17 +713,19 @@ function drawHoverCards(ordered) {
 function drawCaption() {
   if (!caption) return;
   caption.t += 0.016;
-  if (caption.t > 4.5) {
+  if (caption.t > 9) {
     caption = null;
     return;
   }
-  const scale = 3;
-  const text = caption.text;
-  const w = text.length * 6 * scale;
-  const x = Math.round((cssW - w) / 2);
-  const y = Math.round(cssH * 0.28);
-  ctx.fillStyle = "rgba(8,4,16,0.55)";
-  ctx.fillRect(x - 16, y - 10, w + 32, 7 * scale + 20);
+  const scale = 2;
+  const text = String(caption.text || "SALE").toUpperCase();
+  const w = measurePixelText(text, scale);
+  const x = Math.round(stage.left + (stage.width - w) / 2);
+  const y = Math.max(stage.top + 12, groundY() - npcHeight() - 56);
+  ctx.fillStyle = "rgba(8,4,16,0.7)";
+  ctx.fillRect(x - 14, y - 8, w + 28, 7 * scale + 16);
+  ctx.fillStyle = "#6b5a3a";
+  ctx.fillRect(x - 14, y - 8, w + 28, 2);
   drawPixelText(ctx, text, x, y, scale, "#fff1a8");
 }
 
