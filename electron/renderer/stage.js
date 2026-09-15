@@ -295,8 +295,6 @@ function stepElevator(dt) {
     if (elevator.rise >= 1) {
       elevator.phase = "opening";
       elevator.doors = 0;
-      if (elevator.reason === "exit") ArcadeAudio.dingExit();
-      else ArcadeAudio.dingEnter();
     }
   } else if (elevator.phase === "opening") {
     elevator.doors = Math.min(1, elevator.doors + dt * 2.8);

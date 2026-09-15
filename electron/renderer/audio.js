@@ -52,24 +52,15 @@ const ArcadeAudio = (() => {
       this.elevatorEnter();
     },
     elevatorEnter() {
-      tone(392, 0.12, "square", 0.12, 0);
-      tone(523, 0.14, "square", 0.13, 0.1);
-      tone(659, 0.2, "square", 0.14, 0.2);
+      tone(392, 0.14, "square", 0.14, 0);
+      tone(523, 0.2, "square", 0.14, 0.14);
     },
     elevatorExit() {
-      tone(659, 0.12, "square", 0.14, 0);
-      tone(523, 0.14, "square", 0.13, 0.1);
-      tone(330, 0.24, "square", 0.14, 0.2);
+      tone(523, 0.14, "square", 0.14, 0);
+      tone(392, 0.22, "square", 0.14, 0.14);
     },
     ding() {
-      this.dingEnter();
-    },
-    dingEnter() {
-      tone(784, 0.16, "square", 0.14);
-    },
-    dingExit() {
-      tone(392, 0.22, "square", 0.14);
-      tone(262, 0.28, "square", 0.11, 0.08);
+      tone(659, 0.16, "square", 0.13);
     },
     step() {
       tone(140, 0.04, "square", 0.06);
